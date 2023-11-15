@@ -31,20 +31,19 @@ setup_client()
 ```{r}
 #function to obtain data by date for list of devices
 source(here("get_data_for_devices.R"))
+
+source(here("get_full_data_test.R"))
 ```
 
-## Load the data
+## Using get_data_for_devices.R
 ```{r}
 start_date <- as.Date("2023-10-15")
 end_date <- as.Date("2023-11-12")
 device_names <- c("MOD-PM-00826", "MOD-PM-00847")
 
 result_df <- get_data_for_devices(start_date, end_date, device_names)
-```
 
-
-```{r}
-  # Calculate missing hours based on the absence of timestamp
+# Calculate missing hours based on the absence of timestamp
 result_df %>%
   group_by(date, hour, monitor) %>%
   summarise(no_data = sum(is.na(pm25))) %>%
@@ -52,9 +51,38 @@ result_df %>%
   ungroup() %>%
   group_by(date, monitor) %>%
   summarise(hours_missing_day = sum(missing_hour)) %>%
-  pivot_wider(names_from = date, values_from = hours_missing_day)
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  datatable()
+
 ```
 
+## Using get_full_data_test.R
+```{r}
+start_date <- as.Date("2023-10-15")
+end_date <- as.Date("2023-11-12")
+device_names <- c(
+  "MOD-PM-00826", "MOD-PM-00847", "MOD-PM-00846", "MOD-PM-00832", 
+  "MOD-PM-00844", "MOD-PM-00845", "MOD-PM-00838", "MOD-PM-00828", 
+  "MOD-PM-00836", "MOD-PM-00831", "MOD-00117"
+)
+
+result <- get_full_data_test(start_date, end_date, device_names)
+result %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  datatable()
+```
+
+
+```{r}
+MOD_00838 <- result %>%
+  filter(monitor == "MOD-PM-00838")
+```
 
 
 
