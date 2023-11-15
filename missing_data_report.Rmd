@@ -1,0 +1,65 @@
+---
+title: "QuantAQ Missing Data Report"
+author: "Lewis White"
+date: "2023-11-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### load packages 
+```{r}
+library(here)
+library(QuantAQAPIClient)
+library(ggplot2)
+library(lubridate)
+library(tictoc)
+library(DT)
+library(purrr)
+library(tidyverse)
+```
+
+### Connect to QuantAQ API (necessary to obtain data)
+
+```{r}
+setup_client()
+```
+
+### source functions
+```{r}
+#function to obtain data by date for list of devices
+source(here("get_data_for_devices.R"))
+```
+
+## Load the data
+```{r}
+start_date <- as.Date("2023-10-15")
+end_date <- as.Date("2023-11-12")
+device_names <- c("MOD-PM-00826", "MOD-PM-00847")
+
+result_df <- get_data_for_devices(start_date, end_date, device_names)
+```
+
+
+```{r}
+  # Calculate missing hours based on the absence of timestamp
+result_df %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day)
+```
+
+
+
+
+
+
+
+
+
