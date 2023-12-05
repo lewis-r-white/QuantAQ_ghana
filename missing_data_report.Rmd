@@ -11,10 +11,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### load packages 
 ```{r}
-library(here)
 library(QuantAQAPIClient)
-library(ggplot2)
-library(lubridate)
+library(here) 
+library(lubridate) 
 library(tictoc)
 library(DT)
 library(purrr)
@@ -22,29 +21,59 @@ library(tidyverse)
 ```
 
 ### Connect to QuantAQ API (necessary to obtain data)
-
 ```{r}
-setup_client()
+setup_client() #log in to QuantAQ account and click developer in the left menu to grab API key
 ```
 
 ### source functions
 ```{r}
 #function to obtain data by date for list of devices
+
+#version 1
 source(here("get_data_for_devices.R"))
 
+#version 2
 source(here("get_full_data_test.R"))
 ```
+
+### create lists of devices by country 
+
+```{r}
+uganda_devices <- c("MOD-PM-00844", "MOD-PM-00847", "MOD-PM-00831", "MOD-PM-00846", "MOD-PM-00832",
+                     "MOD-PM-00845", "MOD-PM-00828", "MOD-PM-00826", "MOD-PM-00838", "MOD-00117",
+                     "MOD-PM-00836")
+
+kenya_devices <- c("MOD-PM-00852", "MOD-PM-00834", "MOD-PM-00830", "MOD-PM-00840", "MOD-PM-00843",
+                    "MOD-PM-00841", "MOD-PM-00849", "MOD-PM-00850", "MOD-PM-00848", "MOD-PM-00829",
+                    "MOD-00116")
+
+ethiopia_devices <- c("MOD-PM-00827", "MOD-PM-00839", "MOD-PM-00842", "MOD-PM-00833", "MOD-PM-00855",
+                    "MOD-PM-00854", "MOD-PM-00835", "MOD-PM-00837", "MOD-PM-00851", "MOD-00118",
+                    "MOD-PM-00853")
+
+ghana_devices <- c("MOD-PM-01054", "MOD-PM-00900", "MOD-PM-00876", "MOD-PM-00882", "MOD-PM-00896",
+                    "MOD-PM-00897", "MOD-PM-00892", "MOD-PM-00877", "MOD-PM-01060", "MOD-PM-01055",
+                    "MOD-PM-00884", "MOD-PM-01056", "MOD-PM-01051", "MOD-PM-01059", "MOD-PM-00881",
+                    "MOD-PM-00891", "MOD-PM-00898", "MOD-PM-01052", "MOD-00400", "MOD-PM-00894",
+                    "MOD-PM-01053", "MOD-PM-00887", "MOD-PM-00886", "MOD-PM-00879", "MOD-PM-00890",
+                    "MOD-PM-00889", "MOD-PM-00899", "MOD-PM-00883", "MOD-PM-00895", "MOD-PM-01057",
+                    "MOD-PM-01058", "MOD-PM-00893", "MOD-PM-00878", "MOD-PM-00888", "MOD-PM-00885",
+                    "MOD-00398", "MOD-00401", "MOD-00399", "MOD-00397", "MOD-PM-00880")
+```
+
 
 ## Using get_data_for_devices.R
 ```{r}
 start_date <- as.Date("2023-10-15")
-end_date <- as.Date("2023-11-12")
+end_date <- as.Date("2023-11-15")
 device_names <- c("MOD-PM-00826", "MOD-PM-00847")
 
 result_df <- get_data_for_devices(start_date, end_date, device_names)
 
+result_df_2 <- get_full_data_test(start_date, end_date, device_names)
+
 # Calculate missing hours based on the absence of timestamp
-result_df %>%
+result_df_2 %>%
   group_by(date, hour, monitor) %>%
   summarise(no_data = sum(is.na(pm25))) %>%
   mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
@@ -57,9 +86,18 @@ result_df %>%
 ```
 
 ## Using get_full_data_test.R
+
 ```{r}
+# In order for the code to run, each device needs to have been online for at least one observation between the specified start date and end date. Otherwise, the following error will result: 
+
+# "Error in `map()`:
+# ℹ In index: 9.
+# Caused by error in `UseMethod()`:
+# ! no applicable method for 'mutate' applied to an object of class "NULL""
+
+
 start_date <- as.Date("2023-10-15")
-end_date <- as.Date("2023-11-12")
+end_date <- as.Date("2023-11-15")
 device_names <- c(
   "MOD-PM-00826", "MOD-PM-00847", "MOD-PM-00846", "MOD-PM-00832", 
   "MOD-PM-00844", "MOD-PM-00845", "MOD-PM-00838", "MOD-PM-00828", 
@@ -67,6 +105,7 @@ device_names <- c(
 )
 
 result <- get_full_data_test(start_date, end_date, device_names)
+
 result %>%
   group_by(date, hour, monitor) %>%
   summarise(no_data = sum(is.na(pm25))) %>%
@@ -79,13 +118,62 @@ result %>%
 ```
 
 
+
+
+## troubleshooting case where device is offline for total period of interest
+
 ```{r}
-MOD_00838 <- result %>%
-  filter(monitor == "MOD-PM-00838")
+# Wrap the function `get_data_by_date` within `possibly` to handle potential errors
+get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
+
+
+get_full_data_test <- function(start_date, end_date, device_names) {
+  start_date <- as.POSIXct(start_date)
+  end_date <- as.POSIXct(end_date)
+  
+  result_df <- map_df(device_names, function(device) {
+    result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
+      formatted_date <- format(date, "%Y-%m-%d")
+      get_data_safe(sn = device, date = formatted_date)
+    }) %>%
+      discard(~ is.null(.x) || length(.x) == 0) %>%
+      map(as.data.frame)
+    
+    result_df_device <- do.call(rbind, result_list)
+    
+    if (!is.null(result_df_device)) {
+      result_df_device <- result_df_device %>%
+        mutate(
+          timestamp = as.POSIXct(timestamp),
+          timestamp = format(timestamp, "%Y-%m-%d %H:%M"),
+          timestamp2 = as.POSIXct(timestamp),
+          date = as.Date(timestamp2),
+          hour = hour(ymd_hms(timestamp2)),
+          monitor = device
+        ) %>%
+        complete(timestamp2 = seq.POSIXt(start_date, end_date, by = "min")) %>%
+        select(monitor, everything())
+    }
+    
+    return(result_df_device)
+  })
+  
+  return(result_df)
+}
+
 ```
 
 
+```{r}
+start_date <- as.Date("2023-11-15")
+end_date <- as.Date("2023-12-01")
 
+
+test_devices <- c("MOD-PM-00838", "MOD-00117",
+                     "MOD-PM-00836")
+
+result <- get_full_data_test(start_date, end_date, device_names = test_devices)
+```
 
 
 
