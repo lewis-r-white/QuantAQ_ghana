@@ -131,10 +131,18 @@ Uganda_00826_full %>%
 
 x <- as.data.frame(get_data_by_date(sn = "MOD-PM-00847", date = "2023-11-04"))
 
+
+
+
+### getting data for date range for one device ----
+
 # Define start_date and end_date
 start_date <- as.Date("2023-10-15")
 end_date <- as.Date("2023-11-12")
-device = "MOD-PM-00847"
+device = "MOD-PM-00836" #offline uganda device
+device = "MOD-PM-01054" #ghana device
+
+
 
 # Function to get data by date, handling errors
 get_data_safe <- possibly(get_data_by_date, otherwise = NULL) #possibly is used to create a version of the get_data_by_date function that returns 
@@ -151,7 +159,184 @@ result_list <- purrr::discard(result_list, ~ is.null(.x) || length(.x) == 0)
 # Combine the list of data frames into a single data frame
 result_df <- do.call(rbind, lapply(result_list, as.data.frame)) %>%
   mutate(monitor = device) %>%
-  select(monitor, everything())
+  select(monitor, everything()) %>%
+  mutate(timestamp = as.POSIXct(timestamp)) %>% 
+  mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
+  mutate(timestamp = lubridate::ymd_hm(timestamp))
 
 
+minutely_df <- data.frame(timestamp = seq.POSIXt(
+  as.POSIXct(start_date, tz = "GMT"),
+  as.POSIXct(end_date, tz = "GMT"),
+  by = "min"
+))
+
+result_df_full <- full_join(result_df, minutely_df) %>% 
+  arrange(timestamp) %>%
+  mutate(date = as.Date(timestamp)) %>%  
+  mutate(hour = hour(ymd_hms(timestamp))) %>%
+  mutate(monitor = device) %>%
+  select(monitor, timestamp, date, hour, everything())
+
+result_df_full %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  datatable()
+
+
+
+### Getting data by date range for list of devices using for loop
+
+# Define start_date and end_date
+start_date <- as.Date("2023-11-15")
+end_date <- as.Date("2023-12-01")
+
+# List of device serial numbers
+device_list <- c("MOD-PM-00826", "MOD-PM-00838", "MOD-00117", "MOD-PM-00836")
+
+# Initialize an empty list to store results for each device
+result_combined <- list()
+
+# Loop through each device in the device list
+for (device in device_list) {
+  # Function to get data by date, handling errors
+  get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
+  
+  # Use map to get data for each date, handling errors
+  result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
+    formatted_date <- format(date, "%Y-%m-%d")
+    get_data_safe(sn = device, date = formatted_date)
+  })
+  
+  # Filter out NULL elements (empty lists)
+  result_list <- purrr::discard(result_list, ~ is.null(.x) || length(.x) == 0)
+  
+  if (!is_empty(result_list)) {
+  # Combine the list of data frames into a single data frame
+  result_df <- do.call(rbind, lapply(result_list, as.data.frame)) %>%
+    mutate(monitor = device) %>%
+    select(monitor, everything()) %>%
+    mutate(timestamp = as.POSIXct(timestamp)) %>% 
+    mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
+    mutate(timestamp = lubridate::ymd_hm(timestamp))
+  
+  minutely_df <- data.frame(timestamp = seq.POSIXt(
+    as.POSIXct(start_date, tz = "UTC"),
+    as.POSIXct(end_date + 1, tz = "UTC"),
+    by = "min"
+  ))
+  
+  result_df_full <- full_join(result_df, minutely_df) %>% 
+    arrange(timestamp) %>%
+    mutate(date = as.Date(timestamp)) %>%  
+    mutate(hour = hour(ymd_hms(timestamp))) %>%
+    mutate(monitor = device) %>%
+    select(monitor, timestamp, date, hour, everything()) 
+  
+  # Store the result for the current device in the combined list
+  result_combined[[device]] <- result_df_full
+  } else {
+    # If there's no data for this device, create an empty dataframe
+    minutely_df_empty <- data.frame(timestamp = seq.POSIXt(
+      as.POSIXct(start_date, tz = "UTC"),
+      as.POSIXct(end_date + 1, tz = "UTC"),
+      by = "min"
+    ))
+    
+    minutely_df_empty <- minutely_df_empty %>% mutate(date = as.Date(timestamp)) %>%  
+      mutate(hour = hour(ymd_hms(timestamp))) %>%
+      mutate(monitor = device) %>%
+      select(monitor, timestamp, date, hour) 
+      
+    result_combined[[device]] <- minutely_df_empty
+  }
+}
+
+# Combine data for all devices into a single data frame
+final_result_df <- bind_rows(result_combined)
+
+final_result_df %>%
+  filter(date <= as.Date(end_date)) %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  datatable()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### using lubridate for one device
+
+# Define start_date and end_date
+start_date <- as.Date("2023-10-15 00:00")
+end_date <- as.Date("2023-11-12 23:59")
+device = "MOD-PM-00836" #offline uganda device
+device = "MOD-PM-00845" #online uganda device
+device = "MOD-PM-01054" #ghana device
+
+
+
+# Function to get data by date, handling errors
+get_data_safe <- possibly(get_data_by_date, otherwise = NULL) #possibly is used to create a version of the get_data_by_date function that returns 
+
+# Use map to get data for each date, handling errors
+result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
+  formatted_date <- format(date, "%Y-%m-%d")
+  get_data_safe(sn = device, date = formatted_date)
+})
+
+# Filter out NULL elements (empty lists)
+result_list <- purrr::discard(result_list, ~ is.null(.x) || length(.x) == 0)
+
+# Combine the list of data frames into a single data frame
+result_df <- do.call(rbind, lapply(result_list, as.data.frame)) %>%
+  mutate(monitor = device) %>%
+  select(monitor, everything()) %>%
+  mutate(timestamp = as_datetime(timestamp)) %>% 
+  mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>%
+  mutate(timestamp = ymd_hm(timestamp))
+
+
+minutely_df <- data.frame(timestamp = seq.POSIXt(
+  as.POSIXct(start_date, tz = "UTC"),
+  as.POSIXct(end_date + 1, tz = "UTC"),
+  by = "min"
+))
+
+result_df_full <- full_join(result_df, minutely_df) %>% 
+  arrange(timestamp) %>%
+  mutate(date = as.Date(timestamp)) %>%  
+  mutate(hour = hour(ymd_hms(timestamp))) %>%
+  mutate(monitor = device) %>%
+  select(monitor, timestamp, date, hour, everything())
+
+result_df_full %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  datatable()
 
