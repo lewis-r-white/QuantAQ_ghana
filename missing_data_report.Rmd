@@ -1,7 +1,5 @@
 ---
 title: "QuantAQ Missing Data Report"
-author: "Lewis White"
-date: "2023-11-15"
 output: html_document
 ---
 
@@ -9,8 +7,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
 ### load packages 
-```{r}
+
 library(QuantAQAPIClient)
 library(here) 
 library(lubridate) 
@@ -20,42 +19,29 @@ library(purrr)
 library(tidyverse)
 ```
 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ### Connect to QuantAQ API (necessary to obtain data)
-```{r}
+
 setup_client() #log in to QuantAQ account and click developer in the left menu to grab API key
 ```
 
-```{r}
-Sys.setenv(TZ='UTC') #SET TIME ZONE
-
-Sys.setenv(TZ = 'Africa/Kampala') #EAT for kenya, uganda, ethiopia 
-```
-
-### source functions
-```{r}
-#function to obtain data by date for list of devices
-
-#version 1
-source(here("get_data_for_devices.R"))
-
-#version 2
-source(here("get_full_data_test.R"))
-```
-
+```{r devices, echo=FALSE, message=FALSE, warning=FALSE}
 ### create lists of devices by country 
 
-```{r}
 uganda_devices <- c("MOD-PM-00844", "MOD-PM-00847", "MOD-PM-00831", "MOD-PM-00846", "MOD-PM-00832",
                      "MOD-PM-00845", "MOD-PM-00828", "MOD-PM-00826", "MOD-PM-00838", "MOD-00117",
                      "MOD-PM-00836")
+
 
 kenya_devices <- c("MOD-PM-00852", "MOD-PM-00834", "MOD-PM-00830", "MOD-PM-00840", "MOD-PM-00843",
                     "MOD-PM-00841", "MOD-PM-00849", "MOD-PM-00850", "MOD-PM-00848", "MOD-PM-00829",
                     "MOD-00116")
 
+
 ethiopia_devices <- c("MOD-PM-00827", "MOD-PM-00839", "MOD-PM-00842", "MOD-PM-00833", "MOD-PM-00855",
                     "MOD-PM-00854", "MOD-PM-00835", "MOD-PM-00837", "MOD-PM-00851", "MOD-00118",
                     "MOD-PM-00853")
+
 
 ghana_devices <- c("MOD-PM-01054", "MOD-PM-00900", "MOD-PM-00876", "MOD-PM-00882", "MOD-PM-00896",
                     "MOD-PM-00897", "MOD-PM-00892", "MOD-PM-00877", "MOD-PM-01060", "MOD-PM-01055",
@@ -67,36 +53,21 @@ ghana_devices <- c("MOD-PM-01054", "MOD-PM-00900", "MOD-PM-00876", "MOD-PM-00882
                     "MOD-00398", "MOD-00401", "MOD-00399", "MOD-00397", "MOD-PM-00880")
 ```
 
+#### For all tables, each cell represents the number of hours a device was inactive during a day. An hour was classified as inactive/missing if there were less than 30 observations during the hour.
 
-## Using get_data_for_devices.R
-```{r}
-# start_date <- as.Date("2023-10-15")
-# end_date <- as.Date("2023-11-15")
-# device_names <- c("MOD-PM-00826", "MOD-PM-00847")
-# 
-# result_df <- get_data_for_devices(start_date, end_date, device_names)
-# 
-# result_df_2 <- get_full_data_test(start_date, end_date, device_names)
-# 
-# # Calculate missing hours based on the absence of timestamp
-# result_df_2 %>%
-#   group_by(date, hour, monitor) %>%
-#   summarise(no_data = sum(is.na(pm25))) %>%
-#   mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
-#   ungroup() %>%
-#   group_by(date, monitor) %>%
-#   summarise(hours_missing_day = sum(missing_hour)) %>%
-#   pivot_wider(names_from = date, values_from = hours_missing_day) %>%
-#   datatable()
+## Uganda Devices
 
+```{r uganda, echo=FALSE, message=FALSE, warning=FALSE}
+Sys.setenv(TZ = 'Africa/Kampala') #EAT for kenya, uganda, ethiopia 
 ```
 
-
-
-```{r}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # Define start_date and end_date
-start_date <- as.Date("2023-11-15")
-end_date <- as.Date("2023-12-01")
+start_date <- as.Date("2023-11-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+
+end_date <- as.Date("2023-12-10")
+
+country = "Uganda"
 
 # List of device serial numbers
 device_list <- uganda_devices
@@ -120,111 +91,7 @@ for (device in device_list) {
   
   if (!is_empty(result_list)) {
   # Combine the list of data frames into a single data frame
-  result_df <- do.call(rbind, lapply(result_list, as.data.frame)) %>%
-    mutate(monitor = device) %>%
-    select(monitor, everything()) %>%
-    mutate(timestamp = as.POSIXct(timestamp)) %>% 
-    mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
-    mutate(timestamp = lubridate::ymd_hm(timestamp))
-  
-  minutely_df <- data.frame(timestamp = seq.POSIXt(
-    as.POSIXct(start_date, tz = "UTC"),
-    as.POSIXct(end_date + 1, tz = "UTC"),
-    by = "min"
-  ))
-  
-  result_df_full <- full_join(result_df, minutely_df) %>% 
-    arrange(timestamp) %>%
-    mutate(date = as.Date(timestamp)) %>%  
-    mutate(hour = hour(ymd_hms(timestamp))) %>%
-    mutate(monitor = device) %>%
-    select(monitor, timestamp, date, hour, everything()) 
-  
-  # Store the result for the current device in the combined list
-  result_combined[[device]] <- result_df_full
-  } else {
-    # If there's no data for this device, create an empty dataframe
-    minutely_df_empty <- data.frame(timestamp = seq.POSIXt(
-      as.POSIXct(start_date, tz = "UTC"),
-      as.POSIXct(end_date + 1, tz = "UTC"),
-      by = "min"
-    ))
-    
-    minutely_df_empty <- minutely_df_empty %>% mutate(date = as.Date(timestamp)) %>%  
-      mutate(hour = hour(ymd_hms(timestamp))) %>%
-      mutate(monitor = device) %>%
-      select(monitor, timestamp, date, hour) 
-      
-    result_combined[[device]] <- minutely_df_empty
-  }
-}
-
-# Combine data for all devices into a single data frame
-final_result_df <- bind_rows(result_combined)
-
-#check with very active device
-uganda11 <- final_result_df %>% filter(monitor == "MOD-00117")
-
-#check with less active device 
-uganda1 <- final_result_df %>% filter(monitor == "MOD-PM-00826")
-
-final_result_df %>%
-  filter(date <= as.Date(end_date)) %>%
-  group_by(date, hour, monitor) %>%
-  summarise(no_data = sum(is.na(pm25))) %>%
-  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
-  ungroup() %>%
-  group_by(date, monitor) %>%
-  summarise(hours_missing_day = sum(missing_hour)) %>%
-  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
-  datatable()
-```
-
-First time is local 3am. So it is 3 hours earlier than what the QuantAQ monitors will say. 
-
-The get_data_by_date() uses timestamp instead of timestamp_local
-
-```{r}
-#add 3 hours to timestamp so it aligns 
-uganda_shifted_time <- uganda11 %>%
-  mutate(timestamp = ymd_hms(timestamp)) %>%
-  mutate(timestamp = timestamp + hours(3))
-```
-
-
-
-
-
-## START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
-
-```{r}
-# Define start_date and end_date
-start_date <- as.Date("2023-11-14")
-end_date <- as.Date("2023-12-01")
-
-# List of device serial numbers
-device_list <- uganda_devices
-
-# Initialize an empty list to store results for each device
-result_combined <- list()
-
-# Loop through each device in the device list
-for (device in device_list) {
-  # Function to get data by date, handling errors
-  get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
-  
-  # Use map to get data for each date, handling errors
-  result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
-    formatted_date <- format(date, "%Y-%m-%d")
-    get_data_safe(sn = device, date = formatted_date)
-  })
-  
-  # Filter out NULL elements (empty lists)
-  result_list <- purrr::discard(result_list, ~ is.null(.x) || length(.x) == 0)
-  
-  if (!is_empty(result_list)) {
-  # Combine the list of data frames into a single data frame
-  result_df <- do.call(rbind, lapply(result_list, as.data.frame)) %>%
+  result_df <- do.call(bind_rows, lapply(result_list, as.data.frame)) %>%
     mutate(monitor = device) %>%
     select(monitor, everything()) %>%
     mutate(timestamp = as.POSIXct(timestamp)) %>% 
@@ -268,13 +135,9 @@ for (device in device_list) {
 
 # Combine data for all devices into a single data frame
 final_result_df <- bind_rows(result_combined)
+```
 
-#check with very active devices
-uganda11 <- final_result_df %>% filter(monitor == "MOD-00117")
-
-#check with less active device 
-uganda1 <- final_result_df %>% filter(monitor == "MOD-PM-00826")
-
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 final_result_df %>%
   filter(date <= as.Date(end_date),
          date > as.Date(start_date)) %>%
@@ -285,131 +148,301 @@ final_result_df %>%
   group_by(date, monitor) %>%
   summarise(hours_missing_day = sum(missing_hour)) %>%
   pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  mutate(country = country) %>%
+  select(monitor, country, everything()) %>%
   datatable()
 ```
 
-First time is local 3am. So it is 3 hours earlier than what the QuantAQ monitors will say. 
+## Kenya Devices
 
-The get_data_by_date() uses timestamp instead of timestamp_local
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## Using get_full_data_test.R
-
-```{r}
-# # In order for the code to run, each device needs to have been online for at least one observation between the specified start date and end date. Otherwise, the following error will result: 
-# 
-# # "Error in `map()`:
-# # ℹ In index: 9.
-# # Caused by error in `UseMethod()`:
-# # ! no applicable method for 'mutate' applied to an object of class "NULL""
-# 
-# 
-# start_date <- as.Date("2023-11-25")
-# end_date <- as.Date("2023-12-05")
-# device_names <- c(
-#   "MOD-PM-00826", "MOD-PM-00847", "MOD-PM-00846", "MOD-PM-00832", 
-#   "MOD-PM-00844", "MOD-PM-00845", "MOD-PM-00838", "MOD-PM-00828", 
-#   "MOD-PM-00836", "MOD-PM-00831", "MOD-00117")
-# 
-# device_names <- c(
-#   "MOD-PM-00826", "MOD-PM-00847", "MOD-PM-00845")
-# 
-# result <- get_full_data_test(start_date, end_date, device_names)
-# 
-# result %>%
-#   group_by(date, hour, monitor) %>%
-#   summarise(no_data = sum(is.na(pm25))) %>%
-#   mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
-#   ungroup() %>%
-#   group_by(date, monitor) %>%
-#   summarise(hours_missing_day = sum(missing_hour)) %>%
-#   pivot_wider(names_from = date, values_from = hours_missing_day) %>%
-#   datatable()
-# 
-# Kenya7 <- result %>% filter(monitor == "MOD-PM-00843")
+```{r kenya, echo=FALSE, message=FALSE, warning=FALSE}
+Sys.setenv(TZ = 'Africa/Kampala') #EAT for kenya, uganda, ethiopia 
 ```
 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Define start_date and end_date
+start_date <- as.Date("2023-11-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
 
+end_date <- as.Date("2023-12-10")
 
+country = "Kenya"
 
-## troubleshooting case where device is offline for total period of interest
+# List of device serial numbers
+device_list <- kenya_devices
 
-```{r}
-# # Wrap the function `get_data_by_date` within `possibly` to handle potential errors
-# get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
-# 
-# 
-# get_full_data_test <- function(start_date, end_date, device_names) {
-#   start_date <- as.POSIXct(start_date)
-#   end_date <- as.POSIXct(end_date)
-#   
-#   result_df <- map_df(device_names, function(device) {
-#     result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
-#       formatted_date <- format(date, "%Y-%m-%d")
-#       get_data_safe(sn = device, date = formatted_date)
-#     }) %>%
-#       discard(~ is.null(.x) || length(.x) == 0) %>%
-#       map(as.data.frame)
-#     
-#     result_df_device <- do.call(rbind, result_list)
-#     
-#     if (!is.null(result_df_device)) {
-#       result_df_device <- result_df_device %>%
-#         mutate(
-#           timestamp = as.POSIXct(timestamp),
-#           timestamp = format(timestamp, "%Y-%m-%d %H:%M"),
-#           timestamp2 = as.POSIXct(timestamp),
-#           date = as.Date(timestamp2),
-#           hour = hour(ymd_hms(timestamp2)),
-#           monitor = device
-#         ) %>%
-#         complete(timestamp2 = seq.POSIXt(start_date, end_date, by = "min")) %>%
-#         select(monitor, everything())
-#     } else {
-#       result_df_device <- data.frame()  # Providing an empty dataframe as the else condition
-#     }
-#     
-#     return(result_df_device)
-#   })
-#   
-#   return(result_df)
-# }
+# Initialize an empty list to store results for each device
+result_combined <- list()
 
+# Loop through each device in the device list
+for (device in device_list) {
+  # Function to get data by date, handling errors
+  get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
+  
+  # Use map to get data for each date, handling errors
+  result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
+    formatted_date <- format(date, "%Y-%m-%d")
+    get_data_safe(sn = device, date = formatted_date)
+  })
+  
+  # Filter out NULL elements (empty lists)
+  result_list <- purrr::discard(result_list, ~ is.null(.x) || length(.x) == 0)
+  
+  if (!is_empty(result_list)) {
+  # Combine the list of data frames into a single data frame
+  result_df <- do.call(bind_rows, lapply(result_list, as.data.frame)) %>%
+    mutate(monitor = device) %>%
+    select(monitor, everything()) %>%
+    mutate(timestamp = as.POSIXct(timestamp)) %>% 
+    mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
+    mutate(timestamp = lubridate::ymd_hm(timestamp)) %>%
+    mutate(local_timestamp = timestamp + hours(3))
+  
+  minutely_df <- data.frame(timestamp = seq.POSIXt(
+    as.POSIXct(start_date, tz = "UTC"),
+    as.POSIXct(end_date + 1, tz = "UTC"),
+    by = "min"
+  )) %>%
+    mutate(local_timestamp = timestamp + hours(3))
+  
+  result_df_full <- full_join(result_df, minutely_df) %>% 
+    arrange(timestamp) %>%
+    mutate(date = as.Date(local_timestamp)) %>%  
+    mutate(hour = hour(ymd_hms(local_timestamp))) %>%
+    mutate(monitor = device) %>%
+    select(monitor, timestamp, local_timestamp, date, hour, everything()) 
+  
+  # Store the result for the current device in the combined list
+  result_combined[[device]] <- result_df_full
+  } else {
+    # If there's no data for this device, create an empty dataframe
+    minutely_df_empty <- data.frame(timestamp = seq.POSIXt(
+      as.POSIXct(start_date, tz = "UTC"),
+      as.POSIXct(end_date + 1, tz = "UTC"),
+      by = "min"
+    )) %>%
+    mutate(local_timestamp = timestamp + hours(3))
+    
+    minutely_df_empty <- minutely_df_empty %>% mutate(date = as.Date(local_timestamp)) %>%  
+      mutate(hour = hour(ymd_hms(local_timestamp))) %>%
+      mutate(monitor = device) %>%
+      select(monitor, timestamp, local_timestamp, date, hour) 
+      
+    result_combined[[device]] <- minutely_df_empty
+  }
+}
+
+# Combine data for all devices into a single data frame
+final_result_df <- bind_rows(result_combined)
 ```
 
-
-```{r}
-# start_date <- as.Date("2023-11-15")
-# end_date <- as.Date("2023-12-01")
-# 
-# 
-# test_devices <- c("MOD-PM-00838", "MOD-00117",
-#                      "MOD-PM-00836")
-# 
-# result <- get_full_data_test(start_date, end_date, device_names = uganda_devices)
-
-### ISSUE: It isn't recording the monitor for missing data points!
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+final_result_df %>%
+  filter(date <= as.Date(end_date),
+         date > as.Date(start_date)) %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  mutate(country = country) %>%
+  select(monitor, country, everything()) %>%
+  datatable()
 ```
 
+## Ethiopia Devices
 
+```{r ethiopia, echo=FALSE, message=FALSE, warning=FALSE}
+Sys.setenv(TZ = 'Africa/Kampala') #EAT for kenya, uganda, ethiopia 
+```
 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Define start_date and end_date
+start_date <- as.Date("2023-11-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
 
+end_date <- as.Date("2023-12-10")
+
+country = "Ethiopia"
+
+# List of device serial numbers
+device_list <- ethiopia_devices
+
+# Initialize an empty list to store results for each device
+result_combined <- list()
+
+# Loop through each device in the device list
+for (device in device_list) {
+  # Function to get data by date, handling errors
+  get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
+  
+  # Use map to get data for each date, handling errors
+  result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
+    formatted_date <- format(date, "%Y-%m-%d")
+    get_data_safe(sn = device, date = formatted_date)
+  })
+  
+  # Filter out NULL elements (empty lists)
+  result_list <- purrr::discard(result_list, ~ is.null(.x) || length(.x) == 0)
+  
+  if (!is_empty(result_list)) {
+  # Combine the list of data frames into a single data frame
+  result_df <- do.call(bind_rows, lapply(result_list, as.data.frame)) %>%
+    mutate(monitor = device) %>%
+    select(monitor, everything()) %>%
+    mutate(timestamp = as.POSIXct(timestamp)) %>% 
+    mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
+    mutate(timestamp = lubridate::ymd_hm(timestamp)) %>%
+    mutate(local_timestamp = timestamp + hours(3))
+  
+  minutely_df <- data.frame(timestamp = seq.POSIXt(
+    as.POSIXct(start_date, tz = "UTC"),
+    as.POSIXct(end_date + 1, tz = "UTC"),
+    by = "min"
+  )) %>%
+    mutate(local_timestamp = timestamp + hours(3))
+  
+  result_df_full <- full_join(result_df, minutely_df) %>% 
+    arrange(timestamp) %>%
+    mutate(date = as.Date(local_timestamp)) %>%  
+    mutate(hour = hour(ymd_hms(local_timestamp))) %>%
+    mutate(monitor = device) %>%
+    select(monitor, timestamp, local_timestamp, date, hour, everything()) 
+  
+  # Store the result for the current device in the combined list
+  result_combined[[device]] <- result_df_full
+  } else {
+    # If there's no data for this device, create an empty dataframe
+    minutely_df_empty <- data.frame(timestamp = seq.POSIXt(
+      as.POSIXct(start_date, tz = "UTC"),
+      as.POSIXct(end_date + 1, tz = "UTC"),
+      by = "min"
+    )) %>%
+    mutate(local_timestamp = timestamp + hours(3))
+    
+    minutely_df_empty <- minutely_df_empty %>% mutate(date = as.Date(local_timestamp)) %>%  
+      mutate(hour = hour(ymd_hms(local_timestamp))) %>%
+      mutate(monitor = device) %>%
+      select(monitor, timestamp, local_timestamp, date, hour) 
+      
+    result_combined[[device]] <- minutely_df_empty
+  }
+}
+
+# Combine data for all devices into a single data frame
+final_result_df <- bind_rows(result_combined)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+final_result_df %>%
+  filter(date <= as.Date(end_date),
+         date > as.Date(start_date)) %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  mutate(country = country) %>%
+  select(monitor, country, everything()) %>%
+  datatable()
+```
+
+## Ghana Devices
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+Sys.setenv(TZ = 'Africa/Accra') #GMT for Ghana
+```
+
+```{r ghana, echo=FALSE, message=FALSE, warning=FALSE}
+# Define start_date and end_date
+start_date <- as.Date("2023-11-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+
+end_date <- as.Date("2023-12-10")
+
+country = "Ghana"
+
+# List of device serial numbers
+device_list <- ghana_devices
+
+# Initialize an empty list to store results for each device
+result_combined <- list()
+
+# Loop through each device in the device list
+for (device in device_list) {
+  # Function to get data by date, handling errors
+  get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
+  
+  # Use map to get data for each date, handling errors
+  result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
+    formatted_date <- format(date, "%Y-%m-%d")
+    get_data_safe(sn = device, date = formatted_date)
+  })
+  
+  # Filter out NULL elements (empty lists)
+  result_list <- purrr::discard(result_list, ~ is.null(.x) || length(.x) == 0)
+  
+  if (!is_empty(result_list)) {
+  # Combine the list of data frames into a single data frame
+  result_df <- do.call(bind_rows, lapply(result_list, as.data.frame)) %>%
+    mutate(monitor = device) %>%
+    select(monitor, everything()) %>%
+    mutate(timestamp = as.POSIXct(timestamp)) %>% 
+    mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
+    mutate(timestamp = lubridate::ymd_hm(timestamp)) %>%
+    mutate(local_timestamp = timestamp)
+  
+  minutely_df <- data.frame(timestamp = seq.POSIXt(
+    as.POSIXct(start_date, tz = "UTC"),
+    as.POSIXct(end_date + 1, tz = "UTC"),
+    by = "min"
+  )) %>%
+    mutate(local_timestamp = timestamp)
+  
+  result_df_full <- full_join(result_df, minutely_df) %>% 
+    arrange(timestamp) %>%
+    mutate(date = as.Date(local_timestamp)) %>%  
+    mutate(hour = hour(ymd_hms(local_timestamp))) %>%
+    mutate(monitor = device) %>%
+    select(monitor, timestamp, local_timestamp, date, hour, everything()) 
+  
+  # Store the result for the current device in the combined list
+  result_combined[[device]] <- result_df_full
+  } else {
+    # If there's no data for this device, create an empty dataframe
+    minutely_df_empty <- data.frame(timestamp = seq.POSIXt(
+      as.POSIXct(start_date, tz = "UTC"),
+      as.POSIXct(end_date + 1, tz = "UTC"),
+      by = "min"
+    )) %>%
+    mutate(local_timestamp = timestamp)
+    
+    minutely_df_empty <- minutely_df_empty %>% mutate(date = as.Date(local_timestamp)) %>%  
+      mutate(hour = hour(ymd_hms(local_timestamp))) %>%
+      mutate(monitor = device) %>%
+      select(monitor, timestamp, local_timestamp, date, hour) 
+      
+    result_combined[[device]] <- minutely_df_empty
+  }
+}
+
+# Combine data for all devices into a single data frame
+final_result_df <- bind_rows(result_combined)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+final_result_df %>%
+  filter(date <= as.Date(end_date),
+         date > as.Date(start_date)) %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  mutate(country = country) %>%
+  select(monitor, country, everything()) %>%
+  datatable()
+```
