@@ -446,3 +446,27 @@ final_result_df %>%
   select(monitor, country, everything()) %>%
   datatable()
 ```
+
+
+```{r}
+test <- final_result_df %>%
+  filter(date <= as.Date(end_date),
+         date > as.Date(start_date)) %>%
+  group_by(date, hour, monitor) %>%
+  summarise(no_data = sum(is.na(pm25))) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  ungroup() %>%
+  group_by(date, monitor) %>%
+  summarise(hours_missing_day = sum(missing_hour)) %>%
+  pivot_wider(names_from = date, values_from = hours_missing_day) %>%
+  mutate(country = country) %>%
+  select(monitor, country, everything())
+
+test %>%
+  datatable(options = list(stripe = FALSE)) %>%
+  formatStyle(
+    names(test),  # Apply formatting to all columns
+    backgroundColor = styleInterval(12, c("white", "#fae6e6"))
+  )
+```
+
