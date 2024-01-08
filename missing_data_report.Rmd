@@ -63,11 +63,11 @@ Sys.setenv(TZ = 'Africa/Kampala') #EAT for kenya, uganda, ethiopia
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # Define start_date and end_date
-start_date <- as.Date("2023-11-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+start_date <- as.Date("2023-12-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
 
-end_date <- as.Date("2023-12-10")
+end_date <- as.Date("2024-01-05")
 
-country = "Uganda"
+country = "Uganda" #for adding country row to final table
 
 # List of device serial numbers
 device_list <- uganda_devices
@@ -77,6 +77,7 @@ result_combined <- list()
 
 # Loop through each device in the device list
 for (device in device_list) {
+  
   # Function to get data by date, handling errors
   get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
   
@@ -99,13 +100,15 @@ for (device in device_list) {
     mutate(timestamp = lubridate::ymd_hm(timestamp)) %>%
     mutate(local_timestamp = timestamp + hours(3))
   
+  #create data frame with just the time range of interest
   minutely_df <- data.frame(timestamp = seq.POSIXt(
     as.POSIXct(start_date, tz = "UTC"),
     as.POSIXct(end_date + 1, tz = "UTC"),
     by = "min"
   )) %>%
-    mutate(local_timestamp = timestamp + hours(3))
+    mutate(local_timestamp = timestamp + hours(3)) #time stamp is in GMT, so adding 3 hours to match EAT. 
   
+  #join the empty time stamp data frame to the downloaded data from QuantAQ
   result_df_full <- full_join(result_df, minutely_df) %>% 
     arrange(timestamp) %>%
     mutate(date = as.Date(local_timestamp)) %>%  
@@ -124,6 +127,7 @@ for (device in device_list) {
     )) %>%
     mutate(local_timestamp = timestamp + hours(3))
     
+    #format minutely_df_empty to have the monitor info and day/hour variables at local time
     minutely_df_empty <- minutely_df_empty %>% mutate(date = as.Date(local_timestamp)) %>%  
       mutate(hour = hour(ymd_hms(local_timestamp))) %>%
       mutate(monitor = device) %>%
@@ -138,12 +142,13 @@ final_result_df <- bind_rows(result_combined)
 ```
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#create table of missing data 
 final_result_df %>%
   filter(date <= as.Date(end_date),
          date > as.Date(start_date)) %>%
   group_by(date, hour, monitor) %>%
   summarise(no_data = sum(is.na(pm25))) %>%
-  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>% #missing hour classified if more than 30 observations are missing in an hour
   ungroup() %>%
   group_by(date, monitor) %>%
   summarise(hours_missing_day = sum(missing_hour)) %>%
@@ -195,7 +200,7 @@ for (device in device_list) {
     mutate(timestamp = as.POSIXct(timestamp)) %>% 
     mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
     mutate(timestamp = lubridate::ymd_hm(timestamp)) %>%
-    mutate(local_timestamp = timestamp + hours(3))
+    mutate(local_timestamp = timestamp + hours(3)) #time stamp is in GMT, so adding 3 hours to match EAT. 
   
   minutely_df <- data.frame(timestamp = seq.POSIXt(
     as.POSIXct(start_date, tz = "UTC"),
@@ -241,7 +246,7 @@ final_result_df %>%
          date > as.Date(start_date)) %>%
   group_by(date, hour, monitor) %>%
   summarise(no_data = sum(is.na(pm25))) %>%
-  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>% #missing hour classified if more than 30 observations are missing in an hour
   ungroup() %>%
   group_by(date, monitor) %>%
   summarise(hours_missing_day = sum(missing_hour)) %>%
@@ -293,7 +298,7 @@ for (device in device_list) {
     mutate(timestamp = as.POSIXct(timestamp)) %>% 
     mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
     mutate(timestamp = lubridate::ymd_hm(timestamp)) %>%
-    mutate(local_timestamp = timestamp + hours(3))
+    mutate(local_timestamp = timestamp + hours(3)) #time stamp is in GMT, so adding 3 hours to match EAT. 
   
   minutely_df <- data.frame(timestamp = seq.POSIXt(
     as.POSIXct(start_date, tz = "UTC"),
@@ -339,7 +344,7 @@ final_result_df %>%
          date > as.Date(start_date)) %>%
   group_by(date, hour, monitor) %>%
   summarise(no_data = sum(is.na(pm25))) %>%
-  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>% #missing hour classified if more than 30 observations are missing in an hour
   ungroup() %>%
   group_by(date, monitor) %>%
   summarise(hours_missing_day = sum(missing_hour)) %>%
@@ -391,7 +396,7 @@ for (device in device_list) {
     mutate(timestamp = as.POSIXct(timestamp)) %>% 
     mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
     mutate(timestamp = lubridate::ymd_hm(timestamp)) %>%
-    mutate(local_timestamp = timestamp)
+    mutate(local_timestamp = timestamp) #local timestamp is the same as the timestamp variable for Ghana (GMT) 
   
   minutely_df <- data.frame(timestamp = seq.POSIXt(
     as.POSIXct(start_date, tz = "UTC"),
@@ -437,7 +442,7 @@ final_result_df %>%
          date > as.Date(start_date)) %>%
   group_by(date, hour, monitor) %>%
   summarise(no_data = sum(is.na(pm25))) %>%
-  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>%
+  mutate(missing_hour = ifelse(no_data > 30, 1, 0)) %>% #missing hour classified if more than 30 observations are missing in an hour
   ungroup() %>%
   group_by(date, monitor) %>%
   summarise(hours_missing_day = sum(missing_hour)) %>%
@@ -449,7 +454,7 @@ final_result_df %>%
 
 
 ```{r}
-test <- final_result_df %>%
+colorful_table <- final_result_df %>%
   filter(date <= as.Date(end_date),
          date > as.Date(start_date)) %>%
   group_by(date, hour, monitor) %>%
@@ -462,7 +467,7 @@ test <- final_result_df %>%
   mutate(country = country) %>%
   select(monitor, country, everything())
 
-test %>%
+colorful_table %>%
   datatable(options = list(stripe = FALSE)) %>%
   formatStyle(
     names(test),  # Apply formatting to all columns
