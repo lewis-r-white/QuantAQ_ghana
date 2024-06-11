@@ -63,9 +63,9 @@ Sys.setenv(TZ = 'Africa/Kampala') #EAT for kenya, uganda, ethiopia
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # Define start_date and end_date
-start_date <- as.Date("2023-12-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+start_date <- as.Date("2024-06-01") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
 
-end_date <- as.Date("2024-01-05")
+end_date <- as.Date("2024-06-10")
 
 country = "Uganda" #for adding country row to final table
 
@@ -166,9 +166,9 @@ Sys.setenv(TZ = 'Africa/Kampala') #EAT for kenya, uganda, ethiopia
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # Define start_date and end_date
-start_date <- as.Date("2023-11-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+start_date <- as.Date("2024-06-01") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
 
-end_date <- as.Date("2023-12-10")
+end_date <- as.Date("2024-06-10")
 
 country = "Kenya"
 
@@ -264,9 +264,10 @@ Sys.setenv(TZ = 'Africa/Kampala') #EAT for kenya, uganda, ethiopia
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # Define start_date and end_date
-start_date <- as.Date("2023-11-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+start_date <- as.Date("2024-06-01") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
 
-end_date <- as.Date("2023-12-10")
+end_date <- as.Date("2024-06-10")
+
 
 country = "Ethiopia"
 
@@ -362,9 +363,10 @@ Sys.setenv(TZ = 'Africa/Accra') #GMT for Ghana
 
 ```{r ghana, echo=FALSE, message=FALSE, warning=FALSE}
 # Define start_date and end_date
-start_date <- as.Date("2023-11-25") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+start_date <- as.Date("2024-06-01") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
 
-end_date <- as.Date("2023-12-10")
+end_date <- as.Date("2024-06-10")
+
 
 country = "Ghana"
 
@@ -467,11 +469,16 @@ colorful_table <- final_result_df %>%
   mutate(country = country) %>%
   select(monitor, country, everything())
 
+
+# Identify numeric columns
+numeric_cols <- names(colorful_table)[sapply(colorful_table, is.numeric)]
+
 colorful_table %>%
   datatable(options = list(stripe = FALSE)) %>%
   formatStyle(
-    names(test),  # Apply formatting to all columns
+    numeric_cols,  # Apply formatting to all numeric columns
     backgroundColor = styleInterval(12, c("white", "#fae6e6"))
   )
+
 ```
 
