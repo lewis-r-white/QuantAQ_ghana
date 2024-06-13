@@ -275,25 +275,19 @@ final_result_df %>%
 
 
 
-
-
-
-
-
-
-
-
-
-
 ### using lubridate for one device
 
 # Define start_date and end_date
 start_date <- as.Date("2023-10-15 00:00")
 end_date <- as.Date("2023-11-12 23:59")
+
 device = "MOD-PM-00836" #offline uganda device
-device = "MOD-PM-00845" #online uganda device
 device = "MOD-PM-01054" #ghana device
 
+
+start_date <- as.POSIXct("2023-11-15 00:01", tz = 'Africa/Kampala')
+end_date <- as.POSIXct("2023-12-01 23:59", tz = 'Africa/Kampala')
+device = "MOD-PM-00845" #online uganda device
 
 
 # Function to get data by date, handling errors
@@ -314,7 +308,10 @@ result_df <- do.call(rbind, lapply(result_list, as.data.frame)) %>%
   select(monitor, everything()) %>%
   mutate(timestamp = as_datetime(timestamp)) %>% 
   mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>%
-  mutate(timestamp = ymd_hm(timestamp))
+  mutate(timestamp = ymd_hm(timestamp)) %>%
+  mutate(timestamp_local = as_datetime(timestamp_local),
+         timestamp_local = format(timestamp_local, "%Y-%m-%d %H:%M"),
+         timestamp_local = ymd_hm(timestamp_local))
 
 
 minutely_df <- data.frame(timestamp = seq.POSIXt(
@@ -323,7 +320,7 @@ minutely_df <- data.frame(timestamp = seq.POSIXt(
   by = "min"
 ))
 
-result_df_full <- full_join(result_df, minutely_df) %>% 
+result_df_full <- full_join(result_df, minutely_df, by = c("timestamp_local" = "timestamp")) %>% 
   arrange(timestamp) %>%
   mutate(date = as.Date(timestamp)) %>%  
   mutate(hour = hour(ymd_hms(timestamp))) %>%
