@@ -1,0 +1,192 @@
+---
+title: "Ghana Air Quality Analysis"
+output: html_document
+date: "2024-06-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+library(here) 
+library(lubridate) 
+library(tictoc)
+library(DT)
+library(purrr)
+library(tidyverse)
+library(data.table)
+
+library(sf)
+```
+
+
+## Location data
+
+```{r}
+location_columns <- c("monitor", "geo_lat", "geo_lon", "date")
+
+location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", select = location_columns ,showProgress = TRUE)
+
+
+location_complete <- location_data[complete.cases(location_data$geo_lat, location_data$geo_lon), ] %>%
+  filter(date > as.Date("2024-03-01"))
+
+# Get unique combinations for each device
+monitor_locations <- location_complete %>%
+  group_by(monitor) %>%
+  distinct(geo_lat, geo_lon) %>%
+  
+  # ADJUSTMENTS (ASK DJ TO CONFIRM) DUE TO ERRORS IN LONGITUDE
+  mutate(geo_lon = case_when(geo_lon == -173058.0000 ~ -1.73058,
+                             geo_lon == 1.5990 ~ -1.5990,
+                             TRUE ~ geo_lon)) %>%
+  filter(geo_lat != 8.05630)
+
+monitor_points <- st_as_sf(monitor_locations, coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+
+
+# LOAD IN THE COUNTRY AND REGION MAP DATA
+
+country <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm0_gss_20210308.shp"))
+
+regions <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20210308.shp")) %>%
+  rename(region = ADM1_EN)
+
+bono_east <- regions %>% filter(region == "Bono East")
+```
+
+
+## PM 1 data
+```{r}
+# specify columns of interest (necessary because dataset is so large)
+pm1_columns <- c("monitor", "timestamp", "date", "hour", "pm1")
+
+# load in the data 
+ghana_pm1 <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", select = pm1_columns ,showProgress = TRUE)
+```
+
+
+```{r}
+p1_hourly <- ghana_pm1 %>% 
+  group_by(monitor, date, hour) %>%
+  summarise(mean_pm1 = mean(pm1, na.rm = TRUE)) 
+
+p1_daily <- ghana_pm1 %>% 
+  group_by(monitor, date) %>%
+  summarise(mean_pm1 = mean(pm1, na.rm = TRUE))
+
+p1_monthly <- ghana_pm1 %>%
+  mutate(month = lubridate::month(date)) %>%
+  group_by(monitor, month) %>%
+  summarise(mean_pm1 = mean(pm1, na.rm = TRUE))
+```
+
+## Summarizing missingness 
+
+```{r}
+# calculate total missingness across all of the monitors and the entire time range of interest 
+overall_missingness <- mean(is.na(ghana_pm1$pm1)) * 100
+
+# daily missingness  
+daily_missingness <- ghana_pm1 %>% 
+  group_by(date) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  
+  filter(date > as.Date("2023-08-15") & date < as.Date("2024-06-11"))
+
+# hourly missingingness
+hourly_missingness <- ghana_pm1 %>% 
+  group_by(hour) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100)
+
+#monitor missingness
+monitor_missingness <- ghana_pm1 %>% 
+  group_by(monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  mutate(monitor = fct_reorder(monitor, -missing_rate))
+
+
+ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
+  geom_line() +
+  labs(title = "Daily Missingness Rate Over Time", x = "Date", y = "Missingness Rate (%)") +
+  theme_minimal() +
+  geom_hline(yintercept = overall_missingness, color = "red")
+
+
+ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
+  stat_smooth(span = 0.5) +
+  labs(title = "Daily Missingness Rate Over Time", x = "Date", y = "Missingness Rate (%)") +
+  theme_minimal() +
+  geom_hline(yintercept = overall_missingness, color = "red")
+
+
+ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Missingness Rate by Monitor", x = "Monitor", y = "Missingness Rate (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+ggplot(hourly_missingness, aes(x = hour, y = missing_rate)) +
+  geom_line() +
+  labs(title = "Hourly Missingness Rate", x = "Hour of the Day", y = "Missingness Rate (%)") +
+  theme_minimal()
+
+
+#monitor missingness by location 
+missing_monitor_location <- left_join(monitor_missingness, monitor_points)
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "lightblue"), color = "black", alpha = 0.5) +
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = missing_monitor_location, aes(geometry = geometry, color = missing_rate), alpha = 0.7, size = 5) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Monitor Missingness and Location",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d", name = "Missing Rate (%)")
+```
+
+# PM 1 trends
+
+```{r}
+p1_heat_map_data <- p1_hourly %>%
+  group_by(date, hour) %>%
+  summarize(mean_pm1 = mean(mean_pm1, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(day = lubridate::day(date),
+         month = lubridate::month(date, label = TRUE, abbr = TRUE),
+         year = lubridate::year(date)) %>%
+  mutate(month = factor(month, levels = c("Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul")))
+
+ggplot(p1_heat_map_data,aes(day,hour,fill=mean_pm1))+
+  geom_tile(color= "white",size=0.1) + 
+  scale_fill_viridis(name="P1 Reading",option ="F") + 
+  facet_grid(~month) +
+  scale_y_continuous(trans = "reverse", breaks = unique(p1_heat_map_data$hour)) +
+  scale_x_continuous(breaks =c(1,10,20,31)) +
+  theme_minimal(base_size = 8) +
+  labs(title= "P1 Aggregated Across Monitors",
+       x="Day",
+       y="Hour Commencing") + 
+  theme(legend.position = "bottom") +
+  theme(plot.title=element_text(size = 14))+
+  theme(axis.text.y=element_text(size=6)) +
+  theme(strip.background = element_rect(colour="white"))+
+  theme(plot.title=element_text(hjust=0))+
+  theme(axis.ticks=element_blank())+
+  theme(axis.text=element_text(size=7))+
+  theme(legend.title=element_text(size=8))+
+  theme(legend.text=element_text(size=6))+
+  theme(panel.background = element_blank())
+```
+
