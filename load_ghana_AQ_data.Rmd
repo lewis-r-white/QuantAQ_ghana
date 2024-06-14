@@ -1,0 +1,131 @@
+---
+title: "Ghana Air Quality Analysis"
+output: html_document
+date: "2024-06-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+
+library(QuantAQAPIClient)
+library(here) 
+library(lubridate) 
+library(tictoc)
+library(DT)
+library(purrr)
+library(tidyverse)
+
+library(data.table)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#load in the data if already exists 
+
+ghana_AQ_parent_full <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", showProgress = TRUE)
+```
+
+```{r devices, echo=FALSE, message=FALSE, warning=FALSE}
+# load in the data if don't have access to the CSV (takes a long time!)
+
+### Connect to QuantAQ API (necessary to obtain data)
+setup_client() #log in to QuantAQ account and click developer in the left menu to grab API key
+
+
+
+### create lists of devices
+ghana_devices <- c("MOD-PM-01054", "MOD-PM-00900", "MOD-PM-00876", "MOD-PM-00882", "MOD-PM-00896",
+                    "MOD-PM-00897", "MOD-PM-00892", "MOD-PM-00877", "MOD-PM-01060", "MOD-PM-01055",
+                    "MOD-PM-00884", "MOD-PM-01056", "MOD-PM-01051", "MOD-PM-01059", "MOD-PM-00881",
+                    "MOD-PM-00891", "MOD-PM-00898", "MOD-PM-01052", "MOD-00400", "MOD-PM-00894",
+                    "MOD-PM-01053", "MOD-PM-00887", "MOD-PM-00886", "MOD-PM-00879", "MOD-PM-00890",
+                    "MOD-PM-00889", "MOD-PM-00899", "MOD-PM-00883", "MOD-PM-00895", "MOD-PM-01057",
+                    "MOD-PM-01058", "MOD-PM-00893", "MOD-PM-00878", "MOD-PM-00888", "MOD-PM-00885",
+                    "MOD-00398", "MOD-00401", "MOD-00399", "MOD-00397", "MOD-PM-00880")
+
+
+Sys.setenv(TZ = 'Africa/Accra') #GMT for Ghana
+
+# Define start_date and end_date
+start_date <- as.Date("2023-08-15") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+
+end_date <- as.Date("2024-06-10")
+
+country = "Ghana"
+
+# List of device serial numbers
+device_list <- ghana_devices
+
+# Initialize an empty list to store results for each device
+result_combined <- list()
+
+# Loop through each device in the device list
+for (device in device_list) {
+  # Function to get data by date, handling errors
+  get_data_safe <- possibly(get_data_by_date, otherwise = NULL)
+  
+  # Use map to get data for each date, handling errors
+  result_list <- map(seq(start_date, end_date, by = "days"), function(date) {
+    formatted_date <- format(date, "%Y-%m-%d")
+    get_data_safe(sn = device, date = formatted_date)
+  })
+  
+  # Filter out NULL elements (empty lists)
+  result_list <- purrr::discard(result_list, ~ is.null(.x) || length(.x) == 0)
+  
+  if (!is_empty(result_list)) {
+  # Combine the list of data frames into a single data frame
+  result_df <- do.call(bind_rows, lapply(result_list, as.data.frame)) %>%
+    mutate(monitor = device) %>%
+    select(monitor, everything()) %>%
+    mutate(timestamp = as.POSIXct(timestamp)) %>% 
+    mutate(timestamp = format(timestamp, "%Y-%m-%d %H:%M")) %>% 
+    mutate(timestamp = lubridate::ymd_hm(timestamp)) %>%
+    mutate(local_timestamp = timestamp) #local timestamp is the same as the timestamp variable for Ghana (GMT) 
+  
+  minutely_df <- data.frame(timestamp = seq.POSIXt(
+    as.POSIXct(start_date, tz = "UTC"),
+    as.POSIXct(end_date + 1, tz = "UTC"),
+    by = "min"
+  )) %>%
+    mutate(local_timestamp = timestamp)
+  
+  result_df_full <- full_join(result_df, minutely_df) %>% 
+    arrange(timestamp) %>%
+    mutate(date = as.Date(local_timestamp)) %>%  
+    mutate(hour = hour(ymd_hms(local_timestamp))) %>%
+    mutate(monitor = device) %>%
+    select(monitor, timestamp, local_timestamp, date, hour, everything()) 
+  
+  # Store the result for the current device in the combined list
+  result_combined[[device]] <- result_df_full
+  } else {
+    # If there's no data for this device, create an empty dataframe
+    minutely_df_empty <- data.frame(timestamp = seq.POSIXt(
+      as.POSIXct(start_date, tz = "UTC"),
+      as.POSIXct(end_date + 1, tz = "UTC"),
+      by = "min"
+    )) %>%
+    mutate(local_timestamp = timestamp)
+    
+    minutely_df_empty <- minutely_df_empty %>% mutate(date = as.Date(local_timestamp)) %>%  
+      mutate(hour = hour(ymd_hms(local_timestamp))) %>%
+      mutate(monitor = device) %>%
+      select(monitor, timestamp, local_timestamp, date, hour) 
+      
+    result_combined[[device]] <- minutely_df_empty
+  }
+}
+
+# Combine data for all devices into a single data frame
+final_result_df <- bind_rows(result_combined)
+
+
+write_csv(final_result_df, "ghana_AQ_parent_full.csv")
+```
+
+
+
