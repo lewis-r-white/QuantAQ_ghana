@@ -17,14 +17,13 @@ library(DT)
 library(purrr)
 library(tidyverse)
 library(data.table)
-
 library(sf)
 ```
 
 
 ## Location data
 
-```{r}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 location_columns <- c("monitor", "geo_lat", "geo_lon", "date")
 
 location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", select = location_columns ,showProgress = TRUE)
@@ -56,29 +55,51 @@ regions <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20
   rename(region = ADM1_EN)
 
 bono_east <- regions %>% filter(region == "Bono East")
+
+
+# LOAD IN THE ROADS DATA
+
+roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"))
+
+st_crs(roads) <- 4326
+
+# Define the bounding box
+bounding_box <- st_bbox(c(xmin = -2.2, ymin = 7.6, xmax = -1.3, ymax = 8.8), crs = st_crs(4326))
+
+# Create a bounding box as an sf object
+bbox_sf <- st_as_sfc(bounding_box)
+
+# Filter the roads dataset to include only those within the bounding box
+roads_filtered <- st_intersection(roads, bbox_sf)
 ```
 
 
 ## PM 1 data
-```{r}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # specify columns of interest (necessary because dataset is so large)
 pm1_columns <- c("monitor", "timestamp", "date", "hour", "pm1")
 
 # load in the data 
 ghana_pm1 <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", select = pm1_columns ,showProgress = TRUE)
+
+pm1_colocation <- ghana_pm1 %>%
+  filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+
+pm1_community <- ghana_pm1 %>%
+  filter(date >= as.Date("2023-09-26"))
 ```
 
 
-```{r}
-p1_hourly <- ghana_pm1 %>% 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+p1_hourly <- pm1_community %>% 
   group_by(monitor, date, hour) %>%
   summarise(mean_pm1 = mean(pm1, na.rm = TRUE)) 
 
-p1_daily <- ghana_pm1 %>% 
+p1_daily <- pm1_community %>% 
   group_by(monitor, date) %>%
   summarise(mean_pm1 = mean(pm1, na.rm = TRUE))
 
-p1_monthly <- ghana_pm1 %>%
+p1_monthly <- pm1_community %>%
   mutate(month = lubridate::month(date)) %>%
   group_by(monitor, month) %>%
   summarise(mean_pm1 = mean(pm1, na.rm = TRUE))
@@ -86,29 +107,33 @@ p1_monthly <- ghana_pm1 %>%
 
 ## Summarizing missingness 
 
-```{r}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # calculate total missingness across all of the monitors and the entire time range of interest 
-overall_missingness <- mean(is.na(ghana_pm1$pm1)) * 100
+overall_missingness <- mean(is.na(pm1_community$pm1)) * 100
 
 # daily missingness  
-daily_missingness <- ghana_pm1 %>% 
+daily_missingness <- pm1_community %>% 
   group_by(date) %>% 
   summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
   
   filter(date > as.Date("2023-08-15") & date < as.Date("2024-06-11"))
 
 # hourly missingingness
-hourly_missingness <- ghana_pm1 %>% 
+hourly_missingness <- pm1_community %>% 
   group_by(hour) %>% 
   summarise(missing_rate = mean(is.na(pm1)) * 100)
 
 #monitor missingness
-monitor_missingness <- ghana_pm1 %>% 
+monitor_missingness <- pm1_community %>% 
   group_by(monitor) %>% 
   summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
   mutate(monitor = fct_reorder(monitor, -missing_rate))
 
 
+
+## DAILY MISSING DATA PERCENTAGE ----
+
+#aggregated across monitors 
 ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
   geom_line() +
   labs(title = "Daily Missingness Rate Over Time", x = "Date", y = "Missingness Rate (%)") +
@@ -122,6 +147,12 @@ ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
   theme_minimal() +
   geom_hline(yintercept = overall_missingness, color = "red")
 
+  
+
+
+
+
+## TOTAL MISSING DATA FOR EACH MONITOR ----
 
 ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
   geom_bar(stat = "identity") +
@@ -129,13 +160,27 @@ ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 
+
+# MISSING DATA PERCENTAGE FOR EACH HOUR OF THE DAY
+
+#aggregated by monitor 
 ggplot(hourly_missingness, aes(x = hour, y = missing_rate)) +
   geom_line() +
   labs(title = "Hourly Missingness Rate", x = "Hour of the Day", y = "Missingness Rate (%)") +
   theme_minimal()
 
+#facet wrap for each monitor 
+pm1_community %>% 
+  group_by(hour, monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  ggplot(aes(x = hour, y = missing_rate)) +
+  geom_line() +
+  facet_wrap(~monitor) +
+  theme_bw()
 
-#monitor missingness by location 
+
+
+# MAP OF MONITOR MISSINGNESS BY LOCATION ----
 missing_monitor_location <- left_join(monitor_missingness, monitor_points)
 
 ggplot() +
@@ -154,11 +199,82 @@ ggplot() +
        y = "") +
   theme_bw() +
   scale_color_gradient(low = "#0540a1", high = "#eb4c2d", name = "Missing Rate (%)")
+
+
+
+
+## HEATMAP OF MISSINGNESS PER DAY FOR EACH MONITOR ----
+pm1_community_with_week <- pm1_community %>%
+  mutate(week = floor_date(date, "week")) # Extract the week
+
+
+daily_na <- pm1_community_with_week %>%
+  group_by(monitor, date) %>%
+  summarize(na_percent = sum(is.na(pm1)) / n() * 100) %>%
+  ungroup() %>%
+  mutate(week = floor_date(date, "week"),  # Extract the week again for plotting
+         day_of_week = factor(weekdays(date), 
+                              levels = c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")))  # Reorder days of the week
+
+
+ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightgreen", high = "darkgreen", na.value = "white") +
+  labs(title = "Percentage of Missing PM1 Data by Day",
+       x = "Week",
+       y = "Day of Week",
+       fill = "NA Percent") +
+  scale_y_discrete(limits = rev(levels(daily_na$day_of_week)),  # Reverse the order to have Sunday at the top
+                   breaks = c("Sunday", "Saturday")) +    # Label only specific days
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(~ monitor, scales = "free_x", ncol = 5)
 ```
+
+
+# Checking Individual Monitor to Fleet Average
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# HOURLY COMPARISON 
+
+#calculate fleet average hourly pm1
+fleet_avg_hourly_pm1 <- p1_hourly %>% 
+  group_by(date, hour) %>%
+  summarize(fleet_average_pm1 = mean(mean_pm1, na.rm = TRUE))
+
+# join fleet average to individual monitor data
+p1_hourly_full <- left_join(p1_hourly, fleet_avg_hourly_pm1, by = join_by(date, hour))
+
+#plot comparison 
+p1_hourly_full %>%
+  ggplot(aes(x = fleet_average_pm1, y = mean_pm1)) +
+  geom_point(alpha = 0.2) +
+  facet_wrap(~monitor) +
+  theme_bw()
+
+
+# DAILY COMPARISON 
+#calculate fleet average hourly pm1
+fleet_avg_daily_pm1 <- p1_daily %>% 
+  group_by(date) %>%
+  summarize(fleet_average_pm1 = mean(mean_pm1, na.rm = TRUE))
+
+# join fleet average to individual monitor data
+p1_daily_full <- left_join(p1_daily, fleet_avg_daily_pm1, by = join_by(date))
+
+#plot comparison 
+p1_daily_full %>%
+  ggplot(aes(x = fleet_average_pm1, y = mean_pm1)) +
+  geom_point(alpha = 0.2) +
+  facet_wrap(~monitor) +
+  theme_bw()
+
+```
+
 
 # PM 1 trends
 
-```{r}
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 p1_heat_map_data <- p1_hourly %>%
   group_by(date, hour) %>%
   summarize(mean_pm1 = mean(mean_pm1, na.rm = TRUE)) %>%
@@ -175,7 +291,7 @@ ggplot(p1_heat_map_data,aes(day,hour,fill=mean_pm1))+
   scale_y_continuous(trans = "reverse", breaks = unique(p1_heat_map_data$hour)) +
   scale_x_continuous(breaks =c(1,10,20,31)) +
   theme_minimal(base_size = 8) +
-  labs(title= "P1 Aggregated Across Monitors",
+  labs(title= "PM1 Aggregated Across Monitors",
        x="Day",
        y="Hour Commencing") + 
   theme(legend.position = "bottom") +
@@ -188,5 +304,111 @@ ggplot(p1_heat_map_data,aes(day,hour,fill=mean_pm1))+
   theme(legend.title=element_text(size=8))+
   theme(legend.text=element_text(size=6))+
   theme(panel.background = element_blank())
+
 ```
+
+
+# Spatial Correlation 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Load necessary libraries 
+library(spdep)
+library(gstat)
+library(units) 
+
+
+summary_stats <- pm1_community %>%
+  group_by(monitor) %>%
+  summarize(
+    mean_pm1 = mean(pm1, na.rm = TRUE),
+    median_pm1 = median(pm1, na.rm = TRUE),
+    sd_pm1 = sd(pm1, na.rm = TRUE)
+  )
+
+monitor_data <- missing_monitor_location %>%
+  left_join(summary_stats, by = "monitor")
+
+ggplot(monitor_data) +
+  geom_sf(aes(geometry = geometry, color = mean_pm1), size = 5) +
+  scale_color_viridis_c() +
+  labs(title = "Spatial Distribution of Mean PM1 Levels",
+       color = "Mean PM1") +
+  theme_minimal()
+
+
+
+# Convert monitor data to spatial object using sf
+monitor_sf <- st_as_sf(monitor_data)
+
+
+# Calculate distance-based spatial weights
+coords <- st_coordinates(monitor_sf)
+nb <- knn2nb(knearneigh(coords, k = 4)) # k-nearest neighbors
+listw <- nb2listw(nb, style = "W")
+
+# Calculate Moran's I
+moran_result <- moran.test(monitor_sf$mean_pm1, listw)
+print(moran_result)
+
+```
+
+
+## including proximity to road 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Assuming pm1_community and missing_monitor_location are already loaded
+
+# Calculate summary statistics for each monitor
+summary_stats <- pm1_community %>%
+  group_by(monitor) %>%
+  summarize(
+    mean_pm1 = mean(pm1, na.rm = TRUE),
+    median_pm1 = median(pm1, na.rm = TRUE),
+    sd_pm1 = sd(pm1, na.rm = TRUE)
+  )
+
+# Merge with monitor location data
+monitor_data <- missing_monitor_location %>%
+  left_join(summary_stats, by = "monitor")
+
+# Visualize spatial distribution of pollution levels
+ggplot(monitor_data) +
+  geom_sf(aes(geometry = geometry, color = mean_pm1), size = 5) +
+  scale_color_viridis_c() +
+  labs(title = "Spatial Distribution of Mean PM1 Levels",
+       color = "Mean PM1") +
+  theme_minimal()
+
+# Convert monitor data to spatial object using sf
+monitor_sf <- st_as_sf(monitor_data)
+
+# Load roads data and set CRS (assuming it's EPSG:4326)
+roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"))
+st_crs(roads) <- 4326
+
+# Find the nearest road for each monitor and calculate the distance
+nearest_roads <- st_nearest_feature(monitor_sf, roads)
+distances <- st_distance(monitor_sf, roads[nearest_roads, ], by_element = TRUE)
+
+# Add distances to the monitor data and convert to numeric
+monitor_sf_road_dist <- monitor_sf %>%
+  mutate(distance_to_road = as.numeric(distances))
+
+# Perform regression analysis
+pm1_road_regression <- lm(mean_pm1 ~ distance_to_road, data = monitor_sf_road_dist)
+summary(pm1_road_regression)
+
+# Visualize the relationship
+ggplot(monitor_sf_road_dist) +
+  geom_point(aes(x = distance_to_road, y = mean_pm1)) +
+  geom_smooth(aes(x = distance_to_road, y = mean_pm1), method = "lm", se = FALSE) +
+  labs(title = "Relationship between Distance to Road and Mean PM1 Levels",
+       x = "Distance to Road (meters)",
+       y = "Mean PM1") +
+  theme_minimal()
+
+```
+
+
+
+
 
