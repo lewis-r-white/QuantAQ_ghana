@@ -18,17 +18,41 @@ library(purrr)
 library(tidyverse)
 library(data.table)
 library(sf)
+library(viridis)
+library(knitr)
+library(modelsummary)
 ```
 
 
-## Location data
+```{r}
+# Source in functions
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
+source(here("src", "load_pollution_datasets.R"))
+
+# source function that aggregates data by time scale of interest (hourly, daily)
+source(here("src", "summarize_pollution_times.R"))
+
+# Source function that creates fleet average vs monitor pollutant reading plot
+source(here("src", "compare_fleet_avg_monitor.R"))
+
+# Source function that creates heatmap of pollutant readings
+source(here("src", "generate_heatmap.R"))
+```
+
+
+```{r location data, echo=FALSE, message=FALSE, warning=FALSE}
+#LOAD LOCATION DATA ----
+
+# identify the location columns
 location_columns <- c("monitor", "geo_lat", "geo_lon", "date")
 
-location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", select = location_columns ,showProgress = TRUE)
+# read in the monitor location data using fread to handle large dataset
+location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", 
+                       select = location_columns, 
+                       showProgress = TRUE)
 
-
+# remove missing values and filter to recent monitor locations 
 location_complete <- location_data[complete.cases(location_data$geo_lat, location_data$geo_lon), ] %>%
   filter(date > as.Date("2024-03-01"))
 
@@ -43,23 +67,31 @@ monitor_locations <- location_complete %>%
                              TRUE ~ geo_lon)) %>%
   filter(geo_lat != 8.05630)
 
+# create spatial feature dataset of monitor points
 monitor_points <- st_as_sf(monitor_locations, coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
 
 
 
-# LOAD IN THE COUNTRY AND REGION MAP DATA
+# LOAD IN THE COUNTRY AND REGION MAP DATA ----
 
-country <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm0_gss_20210308.shp"))
+country <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm0_gss_20210308.shp"), quiet = TRUE)
 
-regions <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20210308.shp")) %>%
+regions <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20210308.shp"), quiet = TRUE) %>%
   rename(region = ADM1_EN)
 
 bono_east <- regions %>% filter(region == "Bono East")
 
+# just the lat/lon for kintampo
+kintampo_sf <- st_as_sf(data.frame(
+  location = "Kintampo",
+  geo_lon = -1.7296,
+  geo_lat = 8.0593
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
 
-# LOAD IN THE ROADS DATA
 
-roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"))
+# LOAD IN THE ROADS DATA ----
+
+roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
 
 st_crs(roads) <- 4326
 
@@ -73,41 +105,201 @@ bbox_sf <- st_as_sfc(bounding_box)
 roads_filtered <- st_intersection(roads, bbox_sf)
 ```
 
+```{r pm1 data, echo=FALSE, message=FALSE, warning=FALSE}
+# LOAD POLLUTION DATA ----
 
-## PM 1 data
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
-# specify columns of interest (necessary because dataset is so large)
-pm1_columns <- c("monitor", "timestamp", "date", "hour", "pm1")
+# Define the pollutants of interest
+pollutants <- c("pm1", "pm10", "pm25")
 
-# load in the data 
-ghana_pm1 <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", select = pm1_columns ,showProgress = TRUE)
+# Define the list to store results
+results <- list()
 
-pm1_colocation <- ghana_pm1 %>%
-  filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+# Load and summarize the data for each pollutant
+for (pollutant in pollutants) {
+  load_pollution_datasets(pollutant)
+  
+  colocation_data <- get(paste0(pollutant, "_colocation"))
+  community_data <- get(paste0(pollutant, "_community"))
+  
+  colocation_summary <- summarize_data(colocation_data, pollutant)
+  community_summary <- summarize_data(community_data, pollutant)
+  
+  results[[paste0(pollutant, "_colocation_hourly")]] <- colocation_summary$hourly
+  results[[paste0(pollutant, "_colocation_daily")]] <- colocation_summary$daily
+  results[[paste0(pollutant, "_community_hourly")]] <- community_summary$hourly
+  results[[paste0(pollutant, "_community_daily")]] <- community_summary$daily
+}
 
-pm1_community <- ghana_pm1 %>%
-  filter(date >= as.Date("2023-09-26"))
+# Access the summarized results
+pm1_colocation_hourly <- results$pm1_colocation_hourly
+pm1_colocation_daily <- results$pm1_colocation_daily
+pm10_colocation_hourly <- results$pm10_colocation_hourly
+pm10_colocation_daily <- results$pm10_colocation_daily
+pm25_colocation_hourly <- results$pm25_colocation_hourly
+pm25_colocation_daily <- results$pm25_colocation_daily
+pm1_community_hourly <- results$pm1_community_hourly
+pm1_community_daily <- results$pm1_community_daily
+pm10_community_hourly <- results$pm10_community_hourly
+pm10_community_daily <- results$pm10_community_daily
+pm25_community_hourly <- results$pm25_community_hourly
+pm25_community_daily <- results$pm25_community_daily
 ```
 
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
-p1_hourly <- pm1_community %>% 
-  group_by(monitor, date, hour) %>%
-  summarise(mean_pm1 = mean(pm1, na.rm = TRUE)) 
+## Monitor Locations
 
-p1_daily <- pm1_community %>% 
+```{r monitor locations, echo=FALSE, message=FALSE, warning=FALSE}
+# Define the bounding box coordinates
+bbox_coords <- matrix(c(-2.2, 7.6, -2.2, 8.8, -1.3, 8.8, -1.3, 7.6, -2.2, 7.6), ncol = 2, byrow = TRUE)
+bbox_polygon <- st_polygon(list(bbox_coords))
+bbox_sf <- st_sfc(bbox_polygon, crs = st_crs(4326))
+
+# Plot the map with the bounding box
+ggplot() +
+  # Add Ghana regions
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "lightblue"), color = "black", alpha = 0.5) +
+  # Add monitor points with transparency
+  geom_sf(data = monitor_points, aes(geometry = geometry), color = "red", alpha = 0.5, size = 2) +
+  # Add bounding box
+  geom_sf(data = bbox_sf, fill = NA, color = "blue", lwd = 0.5, linetype = "solid") +
+  # Add Ghana country boundary
+  geom_sf(data = country, fill = NA, color = "black", size = 1) +
+  labs(title = "Monitor Locations in Ghana") +
+  theme_bw()
+
+
+# Plot the zoomed-in map
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "lightblue"), color = "black", alpha = 0.5) +
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = monitor_points, aes(geometry = geometry), color = "red", alpha = 0.5, size = 5) +
+  # Add Kintampo marker
+  geom_sf(data = kintampo_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add annotation text
+  annotate("text", x = -1.73, y = 8.09, label = "KHRC", color = "black", size = 5) +
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  labs(title = "Monitor Locations (Zoomed-In)",
+       x = "", 
+       y = "") +
+  theme_bw()
+```
+
+
+# Summarizing Missingness
+
+## Colocation Missingness
+
+```{r colocation missingness, echo=FALSE, message=FALSE, warning=FALSE}
+# THE MISSING DATA APPEARS TO BE CONSISTENT ACCROSS POLLUTANTS, SO USING PM 1 TO IDENTIFY MISSING VALUES 
+
+# calculate total missingness across all of the monitors and the entire time range of interest 
+overall_missingness <- mean(is.na(pm1_colocation$pm1)) * 100
+
+# daily missingness  
+daily_missingness <- pm1_colocation %>% 
+  group_by(date) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  
+  filter(date > as.Date("2023-08-15") & date < as.Date("2023-09-21"))
+
+# hourly missingingness
+hourly_missingness <- pm1_colocation %>% 
+  group_by(hour) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100)
+
+#monitor missingness
+monitor_missingness <- pm1_colocation %>% 
+  group_by(monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  mutate(monitor = fct_reorder(monitor, -missing_rate))
+
+
+
+## DAILY MISSING DATA PERCENTAGE ----
+
+#aggregated across monitors 
+ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
+  geom_line() +
+  labs(title = "Daily Missing Data Rate Over Time During Monitor Colocation", x = "Date", y = "Missing Data Rate (%)") +
+  theme_minimal() +
+  geom_hline(yintercept = overall_missingness, color = "red")
+
+
+ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
+  stat_smooth(span = 0.5) +
+  labs(title = "Daily Missing Data Rate Over Time During Monitor Colocation", x = "Date", y = "Missing Data Rate (%)") +
+  theme_minimal() +
+  geom_hline(yintercept = overall_missingness, color = "red")
+
+  
+
+
+## TOTAL MISSING DATA FOR EACH MONITOR ----
+
+ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Missing Data Rate by Monitor During Colocation", x = "Monitor", y = "Missing Data Rate (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+
+# MISSING DATA PERCENTAGE FOR EACH HOUR OF THE DAY
+
+#aggregated by monitor 
+ggplot(hourly_missingness, aes(x = hour, y = missing_rate)) +
+  geom_line() +
+  labs(title = "Hourly Missing Data Rate During Monitor Colocation", x = "Hour of the Day", y = "Missing Data Rate (%)") +
+  theme_minimal()
+
+#facet wrap for each monitor 
+pm1_colocation %>% 
+  group_by(hour, monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  ggplot(aes(x = hour, y = missing_rate)) +
+  geom_line() +
+  facet_wrap(~monitor) +
+  labs(y = "Missing data rate (%)",
+       x = "Hour of the Day",
+       title = "Hourly Missing Data Rate for Each Monitor During Colocation") +
+  theme_bw()
+
+
+
+## HEATMAP OF MISSINGNESS PER DAY FOR EACH MONITOR ----
+pm1_colocation_with_week <- pm1_colocation %>%
+  mutate(week = floor_date(date, "week")) # Extract the week
+
+
+daily_na <- pm1_colocation_with_week %>%
   group_by(monitor, date) %>%
-  summarise(mean_pm1 = mean(pm1, na.rm = TRUE))
-
-p1_monthly <- pm1_community %>%
-  mutate(month = lubridate::month(date)) %>%
-  group_by(monitor, month) %>%
-  summarise(mean_pm1 = mean(pm1, na.rm = TRUE))
+  summarize(na_percent = sum(is.na(pm1)) / n() * 100) %>%
+  ungroup() %>%
+  mutate(week = floor_date(date, "week"),  # Extract the week again for plotting
+         day_of_week = factor(weekdays(date), 
+                              levels = c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")))  # Reorder days of the week
 ```
 
-## Summarizing missingness 
+```{r colocation missingness heatmap, fig.height=12, fig.width=8, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightgreen", high = "darkgreen", na.value = "white") +
+  labs(title = "Percentage of Missing PM1 Data by Day During Colocation",
+       x = "Week",
+       y = "Day of Week",
+       fill = "NA Percent") +
+  scale_y_discrete(limits = rev(levels(daily_na$day_of_week)),  # Reverse the order to have Sunday at the top
+                   breaks = c("Sunday", "Saturday")) +    # Label only specific days
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(~ monitor, scales = "free_x", ncol = 5)
+```
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+## Community Missingness
+
+```{r missing data, echo=FALSE, message=FALSE, warning=FALSE}
 # calculate total missingness across all of the monitors and the entire time range of interest 
 overall_missingness <- mean(is.na(pm1_community$pm1)) * 100
 
@@ -116,7 +308,7 @@ daily_missingness <- pm1_community %>%
   group_by(date) %>% 
   summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
   
-  filter(date > as.Date("2023-08-15") & date < as.Date("2024-06-11"))
+  filter(date > as.Date("2023-09-25") & date < as.Date("2024-06-11"))
 
 # hourly missingingness
 hourly_missingness <- pm1_community %>% 
@@ -136,27 +328,25 @@ monitor_missingness <- pm1_community %>%
 #aggregated across monitors 
 ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
   geom_line() +
-  labs(title = "Daily Missingness Rate Over Time", x = "Date", y = "Missingness Rate (%)") +
+  labs(title = "Daily Missing Data Rate Over Time", x = "Date", y = "Missing Data Rate (%)") +
   theme_minimal() +
   geom_hline(yintercept = overall_missingness, color = "red")
 
 
 ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
   stat_smooth(span = 0.5) +
-  labs(title = "Daily Missingness Rate Over Time", x = "Date", y = "Missingness Rate (%)") +
+  labs(title = "Daily Missing Data Rate Over Time", x = "Date", y = "Missing Data Rate (%)") +
   theme_minimal() +
   geom_hline(yintercept = overall_missingness, color = "red")
 
   
 
 
-
-
 ## TOTAL MISSING DATA FOR EACH MONITOR ----
 
 ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
   geom_bar(stat = "identity") +
-  labs(title = "Missingness Rate by Monitor", x = "Monitor", y = "Missingness Rate (%)") +
+  labs(title = "Missing Data Rate by Monitor", x = "Monitor", y = "Missing Data Rate (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 
@@ -166,7 +356,7 @@ ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
 #aggregated by monitor 
 ggplot(hourly_missingness, aes(x = hour, y = missing_rate)) +
   geom_line() +
-  labs(title = "Hourly Missingness Rate", x = "Hour of the Day", y = "Missingness Rate (%)") +
+  labs(title = "Hourly Missing Data Rate", x = "Hour of the Day", y = "Missing Data Rate (%)") +
   theme_minimal()
 
 #facet wrap for each monitor 
@@ -176,8 +366,9 @@ pm1_community %>%
   ggplot(aes(x = hour, y = missing_rate)) +
   geom_line() +
   facet_wrap(~monitor) +
-  theme_bw()
-
+  theme_bw() +
+  labs(title = "Hourly Missing Data Rate for Each Monitor During Colocation", x = "Hour of the Day", y = "Missing Data Rate (%)") +
+  theme_minimal()
 
 
 # MAP OF MONITOR MISSINGNESS BY LOCATION ----
@@ -194,12 +385,11 @@ ggplot() +
   coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
   
   # Customize
-  labs(title = "Monitor Missingness and Location",
+  labs(title = "Monitor Missing Data and Location",
        x = "", 
        y = "") +
   theme_bw() +
   scale_color_gradient(low = "#0540a1", high = "#eb4c2d", name = "Missing Rate (%)")
-
 
 
 
@@ -215,7 +405,9 @@ daily_na <- pm1_community_with_week %>%
   mutate(week = floor_date(date, "week"),  # Extract the week again for plotting
          day_of_week = factor(weekdays(date), 
                               levels = c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")))  # Reorder days of the week
+```
 
+```{r missingness heat map, fig.height=16, fig.width=9, echo=FALSE, message=FALSE, warning=FALSE}
 
 ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
   geom_tile(color = "white") +
@@ -232,85 +424,106 @@ ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
 ```
 
 
-# Checking Individual Monitor to Fleet Average
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
-# HOURLY COMPARISON 
+# Pollutant Trends
 
-#calculate fleet average hourly pm1
-fleet_avg_hourly_pm1 <- p1_hourly %>% 
-  group_by(date, hour) %>%
-  summarize(fleet_average_pm1 = mean(mean_pm1, na.rm = TRUE))
+## PM 2.5
 
-# join fleet average to individual monitor data
-p1_hourly_full <- left_join(p1_hourly, fleet_avg_hourly_pm1, by = join_by(date, hour))
+### Colocation 
 
-#plot comparison 
-p1_hourly_full %>%
-  ggplot(aes(x = fleet_average_pm1, y = mean_pm1)) +
-  geom_point(alpha = 0.2) +
-  facet_wrap(~monitor) +
-  theme_bw()
+#### Data Quality Check: Comparing PM 2.5 From Individual Monitors to Fleet Average
+
+```{r colocation monitor fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm25_colocation_hourly, "pm25", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm25_colocation_daily, "pm25", "daily")
+
+```
+
+#### PM 2.5 Trend Heatmap
+
+```{r colocation pm1 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm25_colocation_hourly, "pm25")
+```
+
+### Community Deployment
+
+#### Checking Individual Monitor to Fleet Average
+
+```{r monitor vs fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm25_community_hourly, "pm25", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm25_community_daily, "pm25", "daily")
+```
+
+#### PM 2.5 Trend Heatmap
+
+```{r pm1 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm25_community_hourly, "pm25")
+
+```
 
 
-# DAILY COMPARISON 
-#calculate fleet average hourly pm1
-fleet_avg_daily_pm1 <- p1_daily %>% 
+
+
+
+
+
+
+## Grand Average plots 
+
+```{r}
+pm1_daily %>%
+  ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
+  geom_line(color = "black", alpha = 0.2) +
+  theme_minimal() +
+  labs(y = "Daily mean PM 1",
+       title = "Daily Average PM 1 for Each Monitor") 
+
+ghana_pm1 %>%
   group_by(date) %>%
-  summarize(fleet_average_pm1 = mean(mean_pm1, na.rm = TRUE))
-
-# join fleet average to individual monitor data
-p1_daily_full <- left_join(p1_daily, fleet_avg_daily_pm1, by = join_by(date))
-
-#plot comparison 
-p1_daily_full %>%
-  ggplot(aes(x = fleet_average_pm1, y = mean_pm1)) +
-  geom_point(alpha = 0.2) +
-  facet_wrap(~monitor) +
-  theme_bw()
-
-```
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Mean PM 1 Accross All Devices")
 
 
-# PM 1 trends
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
-p1_heat_map_data <- p1_hourly %>%
-  group_by(date, hour) %>%
-  summarize(mean_pm1 = mean(mean_pm1, na.rm = TRUE)) %>%
-  ungroup() %>%
-  mutate(day = lubridate::day(date),
-         month = lubridate::month(date, label = TRUE, abbr = TRUE),
-         year = lubridate::year(date)) %>%
-  mutate(month = factor(month, levels = c("Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul")))
+ghana_pm1 %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(monitor, date) %>%
+  summarise(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
+  geom_line(color = "black", alpha = 0.4) +
+  theme_minimal() +
+  labs(y = "Mean PM 1 ",
+       title = "Daily Average PM 1 for Each Monitor During Primary Cooking Hours (3-7)") 
+  
 
-ggplot(p1_heat_map_data,aes(day,hour,fill=mean_pm1))+
-  geom_tile(color= "white",size=0.1) + 
-  scale_fill_viridis(name="P1 Reading",option ="F") + 
-  facet_grid(~month) +
-  scale_y_continuous(trans = "reverse", breaks = unique(p1_heat_map_data$hour)) +
-  scale_x_continuous(breaks =c(1,10,20,31)) +
-  theme_minimal(base_size = 8) +
-  labs(title= "PM1 Aggregated Across Monitors",
-       x="Day",
-       y="Hour Commencing") + 
-  theme(legend.position = "bottom") +
-  theme(plot.title=element_text(size = 14))+
-  theme(axis.text.y=element_text(size=6)) +
-  theme(strip.background = element_rect(colour="white"))+
-  theme(plot.title=element_text(hjust=0))+
-  theme(axis.ticks=element_blank())+
-  theme(axis.text=element_text(size=7))+
-  theme(legend.title=element_text(size=8))+
-  theme(legend.text=element_text(size=6))+
-  theme(panel.background = element_blank())
+ghana_pm1 %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(date) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Mean PM 1 Accross All Devices During Cooking Hours (3-7)")
 
 ```
 
 
-# Spatial Correlation 
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+## Spatial Correlation
+
+```{r spatial correlation, echo=FALSE, message=FALSE, warning=FALSE}
 # Load necessary libraries 
 library(spdep)
 library(gstat)
@@ -336,25 +549,55 @@ ggplot(monitor_data) +
   theme_minimal()
 
 
+```
 
+### Calculate Moran I for Spatial Correlation
+
+```{r moran i, echo=FALSE, message=FALSE, warning=FALSE}
 # Convert monitor data to spatial object using sf
 monitor_sf <- st_as_sf(monitor_data)
 
-
 # Calculate distance-based spatial weights
 coords <- st_coordinates(monitor_sf)
-nb <- knn2nb(knearneigh(coords, k = 4)) # k-nearest neighbors
+nb <- knn2nb(knearneigh(coords, k = 5)) # k-nearest neighbors
 listw <- nb2listw(nb, style = "W")
+
 
 # Calculate Moran's I
 moran_result <- moran.test(monitor_sf$mean_pm1, listw)
-print(moran_result)
+
+# Extract relevant values directly
+observed_value <- as.numeric(moran_result$estimate["Moran I statistic"])
+expected_value <- as.numeric(moran_result$estimate["Expectation"])
+variance <- as.numeric(moran_result$estimate["Variance"])
+z_score <- as.numeric(moran_result$statistic)
+p_value <- as.numeric(moran_result$p.value)
+
+# Create the Moran's I results table
+moran_table <- data.frame(
+  Test = "Moran's I Statistic",
+  `Observed Value` = observed_value,
+  `Expected Value` = expected_value,
+  `Variance` = variance,
+  `Z-score` = z_score,
+  `p-value` = p_value
+)
+
+kable(moran_table, caption = "Moran I Test Results")
 
 ```
 
+**Interpretation of Moran I Statistic**
 
-## including proximity to road 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
+-   -1: The variable of interest is perfectly dispersed
+
+-   0: The variable of interest is randomly dispersed
+
+-   1: The variable of interest is perfectly clustered together
+
+### Including proximity to road
+
+```{r road, echo=FALSE, message=FALSE, warning=FALSE}
 # Assuming pm1_community and missing_monitor_location are already loaded
 
 # Calculate summary statistics for each monitor
@@ -370,11 +613,13 @@ summary_stats <- pm1_community %>%
 monitor_data <- missing_monitor_location %>%
   left_join(summary_stats, by = "monitor")
 
-# Visualize spatial distribution of pollution levels
-ggplot(monitor_data) +
-  geom_sf(aes(geometry = geometry, color = mean_pm1), size = 5) +
+
+# Visualize spatial distribution of pollution levels. Plot with roads data
+ggplot() +
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  geom_sf(data = monitor_data, aes(geometry = geometry, color = mean_pm1), size = 5, alpha = 0.6) +  # Add monitor data
   scale_color_viridis_c() +
-  labs(title = "Spatial Distribution of Mean PM1 Levels",
+  labs(title = "Spatial Distribution of Mean PM1 Levels with Roads",
        color = "Mean PM1") +
   theme_minimal()
 
@@ -382,7 +627,7 @@ ggplot(monitor_data) +
 monitor_sf <- st_as_sf(monitor_data)
 
 # Load roads data and set CRS (assuming it's EPSG:4326)
-roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"))
+roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
 st_crs(roads) <- 4326
 
 # Find the nearest road for each monitor and calculate the distance
@@ -395,7 +640,6 @@ monitor_sf_road_dist <- monitor_sf %>%
 
 # Perform regression analysis
 pm1_road_regression <- lm(mean_pm1 ~ distance_to_road, data = monitor_sf_road_dist)
-summary(pm1_road_regression)
 
 # Visualize the relationship
 ggplot(monitor_sf_road_dist) +
@@ -403,12 +647,10 @@ ggplot(monitor_sf_road_dist) +
   geom_smooth(aes(x = distance_to_road, y = mean_pm1), method = "lm", se = FALSE) +
   labs(title = "Relationship between Distance to Road and Mean PM1 Levels",
        x = "Distance to Road (meters)",
-       y = "Mean PM1") +
+       y = "Average PM1 Reading") +
   theme_minimal()
 
+# summary table of regression 
+modelsummary(pm1_road_regression)
+
 ```
-
-
-
-
-
