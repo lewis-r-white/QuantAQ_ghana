@@ -21,6 +21,9 @@ library(sf)
 library(viridis)
 library(knitr)
 library(modelsummary)
+library(spdep)
+library(gstat)
+library(units) 
 ```
 
 
@@ -38,6 +41,22 @@ source(here("src", "compare_fleet_avg_monitor.R"))
 
 # Source function that creates heatmap of pollutant readings
 source(here("src", "generate_heatmap.R"))
+
+# Source function to make map of pollution values at each monitor location
+source(here("src", "generate_spatial_pollution_map.R"))
+
+# source function to calculate moran i 
+source(here("src", "calculate_moran_i.R"))
+
+# source function to prepare data for road regression analysis and plotting
+source(here("src", "prep_monitor_road_data.R"))
+
+# source function to plot map of pollutant levels by location with roads 
+source(here("src", "generate_spatial_pollution_road_map.R"))
+
+# source function to run regression analysis on pollutant / distance to road
+source(here("src", "regress_pollutant_road.R"))
+
 ```
 
 
@@ -91,9 +110,10 @@ kintampo_sf <- st_as_sf(data.frame(
 
 # LOAD IN THE ROADS DATA ----
 
+# Load roads data and set CRS (assuming it's EPSG:4326)
 roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
-
 st_crs(roads) <- 4326
+
 
 # Define the bounding box
 bounding_box <- st_bbox(c(xmin = -2.2, ymin = 7.6, xmax = -1.3, ymax = 8.8), crs = st_crs(4326))
@@ -464,8 +484,45 @@ compare_fleet_avg_monitor(pm25_community_daily, "pm25", "daily")
 
 ```{r pm1 trends, echo=FALSE, message=FALSE, warning=FALSE}
 generate_heatmap(pm25_community_hourly, "pm25")
+```
+
+
+
+#### Spatial Correlation
+
+```{r spatial correlation, echo=FALSE, message=FALSE, warning=FALSE}
+generate_spatial_pollution_map(pm25_community, "pm25", missing_monitor_location)
+```
+
+#### Calculate Moran I for Spatial Correlation
+
+```{r moran i, echo=FALSE, message=FALSE, warning=FALSE}
+calculate_moran_i(pm25_community, "pm25", missing_monitor_location)
+```
+
+**Interpretation of Moran I Statistic**
+
+-   -1: The variable of interest is perfectly dispersed
+
+-   0: The variable of interest is randomly dispersed
+
+-   1: The variable of interest is perfectly clustered together
+
+#### Including proximity to road
+
+```{r road, echo=FALSE, message=FALSE, warning=FALSE}
+
+monitor_sf_road_dist <- prep_monitor_road_data(pm25_community, "pm25", missing_monitor_location, roads)
+
+generate_spatial_pollution_road_map(monitor_sf_road_dist, roads_filtered, "pm25")
+
+pm25_regression_results <- regress_polutant_road(monitor_sf_road_dist, "pm25")
+
+print(pm25_regression_results$plot)
+print(pm25_regression_results$summary_table)
 
 ```
+
 
 
 
@@ -477,23 +534,14 @@ generate_heatmap(pm25_community_hourly, "pm25")
 ## Grand Average plots 
 
 ```{r}
-pm1_daily %>%
+ghana_pm1 %>%
+  group_by(date, monitor) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
   ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
   geom_line(color = "black", alpha = 0.2) +
   theme_minimal() +
-  labs(y = "Daily mean PM 1",
-       title = "Daily Average PM 1 for Each Monitor") 
-
-ghana_pm1 %>%
-  group_by(date) %>%
-  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
-  ggplot(aes(x = date, y = mean_pm1)) +
-  geom_line() +
-  theme_minimal() +
   labs(y = "Mean PM 1",
-       title = "Mean PM 1 Accross All Devices")
-
-
+       title = "Average PM 1 Accross All Devices")
 
 ghana_pm1 %>%
   filter(hour >= 15 & hour < 18) %>%
@@ -504,7 +552,16 @@ ghana_pm1 %>%
   theme_minimal() +
   labs(y = "Mean PM 1 ",
        title = "Daily Average PM 1 for Each Monitor During Primary Cooking Hours (3-7)") 
-  
+
+
+ghana_pm1 %>%
+  group_by(date) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Average PM 1 Accross All Devices")
 
 ghana_pm1 %>%
   filter(hour >= 15 & hour < 18) %>%
@@ -516,141 +573,40 @@ ghana_pm1 %>%
   labs(y = "Mean PM 1",
        title = "Mean PM 1 Accross All Devices During Cooking Hours (3-7)")
 
+
+
+daily_pollutants <- left_join(pm1_community_daily, pm25_community_daily) %>% 
+  left_join(pm10_community_daily)
+
+daily_pollutants_long <- daily_pollutants %>%
+  group_by(date) %>%
+  summarise('Mean PM 1' = mean(mean_pm1, na.rm = TRUE),
+            'Mean PM 2.5' = mean(mean_pm25, na.rm = TRUE),
+            'Mean PM 10' = mean(mean_pm10, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_longer(cols = c("Mean PM 1", "Mean PM 2.5", "Mean PM 10"), names_to = "pollutant", values_to = "measurement")
+
+# Convert the 'pollutant' column to a factor with the desired order
+daily_pollutants_long$pollutant <- factor(daily_pollutants_long$pollutant, levels = c("Mean PM 1", "Mean PM 2.5", "Mean PM 10"))
+
+daily_pollutants_long %>%
+  ggplot(aes(x = date, y = measurement)) +
+  geom_line() +
+  theme_bw() +
+  labs(x = "Date",
+       y = "Pollutant Measurement",
+       title = "Average Daily Particulate Matter Levels Across All Monitors") +
+  facet_grid(pollutant ~ ., scales = "free_y")
+
+
+daily_pollutants_long %>%
+  ggplot(aes(x = date, y = measurement)) +
+  geom_smooth() +
+  theme_bw() +
+  labs(x = "Date",
+       y = "Pollutant Measurement",
+       title = "Average Daily Particulate Matter Levels Across All Monitors") +
+  facet_grid(pollutant ~ ., scales = "free_y")
 ```
 
 
-
-
-## Spatial Correlation
-
-```{r spatial correlation, echo=FALSE, message=FALSE, warning=FALSE}
-# Load necessary libraries 
-library(spdep)
-library(gstat)
-library(units) 
-
-
-summary_stats <- pm1_community %>%
-  group_by(monitor) %>%
-  summarize(
-    mean_pm1 = mean(pm1, na.rm = TRUE),
-    median_pm1 = median(pm1, na.rm = TRUE),
-    sd_pm1 = sd(pm1, na.rm = TRUE)
-  )
-
-monitor_data <- missing_monitor_location %>%
-  left_join(summary_stats, by = "monitor")
-
-ggplot(monitor_data) +
-  geom_sf(aes(geometry = geometry, color = mean_pm1), size = 5) +
-  scale_color_viridis_c() +
-  labs(title = "Spatial Distribution of Mean PM1 Levels",
-       color = "Mean PM1") +
-  theme_minimal()
-
-
-```
-
-### Calculate Moran I for Spatial Correlation
-
-```{r moran i, echo=FALSE, message=FALSE, warning=FALSE}
-# Convert monitor data to spatial object using sf
-monitor_sf <- st_as_sf(monitor_data)
-
-# Calculate distance-based spatial weights
-coords <- st_coordinates(monitor_sf)
-nb <- knn2nb(knearneigh(coords, k = 5)) # k-nearest neighbors
-listw <- nb2listw(nb, style = "W")
-
-
-# Calculate Moran's I
-moran_result <- moran.test(monitor_sf$mean_pm1, listw)
-
-# Extract relevant values directly
-observed_value <- as.numeric(moran_result$estimate["Moran I statistic"])
-expected_value <- as.numeric(moran_result$estimate["Expectation"])
-variance <- as.numeric(moran_result$estimate["Variance"])
-z_score <- as.numeric(moran_result$statistic)
-p_value <- as.numeric(moran_result$p.value)
-
-# Create the Moran's I results table
-moran_table <- data.frame(
-  Test = "Moran's I Statistic",
-  `Observed Value` = observed_value,
-  `Expected Value` = expected_value,
-  `Variance` = variance,
-  `Z-score` = z_score,
-  `p-value` = p_value
-)
-
-kable(moran_table, caption = "Moran I Test Results")
-
-```
-
-**Interpretation of Moran I Statistic**
-
--   -1: The variable of interest is perfectly dispersed
-
--   0: The variable of interest is randomly dispersed
-
--   1: The variable of interest is perfectly clustered together
-
-### Including proximity to road
-
-```{r road, echo=FALSE, message=FALSE, warning=FALSE}
-# Assuming pm1_community and missing_monitor_location are already loaded
-
-# Calculate summary statistics for each monitor
-summary_stats <- pm1_community %>%
-  group_by(monitor) %>%
-  summarize(
-    mean_pm1 = mean(pm1, na.rm = TRUE),
-    median_pm1 = median(pm1, na.rm = TRUE),
-    sd_pm1 = sd(pm1, na.rm = TRUE)
-  )
-
-# Merge with monitor location data
-monitor_data <- missing_monitor_location %>%
-  left_join(summary_stats, by = "monitor")
-
-
-# Visualize spatial distribution of pollution levels. Plot with roads data
-ggplot() +
-  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
-  geom_sf(data = monitor_data, aes(geometry = geometry, color = mean_pm1), size = 5, alpha = 0.6) +  # Add monitor data
-  scale_color_viridis_c() +
-  labs(title = "Spatial Distribution of Mean PM1 Levels with Roads",
-       color = "Mean PM1") +
-  theme_minimal()
-
-# Convert monitor data to spatial object using sf
-monitor_sf <- st_as_sf(monitor_data)
-
-# Load roads data and set CRS (assuming it's EPSG:4326)
-roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
-st_crs(roads) <- 4326
-
-# Find the nearest road for each monitor and calculate the distance
-nearest_roads <- st_nearest_feature(monitor_sf, roads)
-distances <- st_distance(monitor_sf, roads[nearest_roads, ], by_element = TRUE)
-
-# Add distances to the monitor data and convert to numeric
-monitor_sf_road_dist <- monitor_sf %>%
-  mutate(distance_to_road = as.numeric(distances))
-
-# Perform regression analysis
-pm1_road_regression <- lm(mean_pm1 ~ distance_to_road, data = monitor_sf_road_dist)
-
-# Visualize the relationship
-ggplot(monitor_sf_road_dist) +
-  geom_point(aes(x = distance_to_road, y = mean_pm1)) +
-  geom_smooth(aes(x = distance_to_road, y = mean_pm1), method = "lm", se = FALSE) +
-  labs(title = "Relationship between Distance to Road and Mean PM1 Levels",
-       x = "Distance to Road (meters)",
-       y = "Average PM1 Reading") +
-  theme_minimal()
-
-# summary table of regression 
-modelsummary(pm1_road_regression)
-
-```
