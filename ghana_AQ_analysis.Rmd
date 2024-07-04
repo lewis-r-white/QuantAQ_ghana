@@ -24,6 +24,7 @@ library(modelsummary)
 library(spdep)
 library(gstat)
 library(units) 
+library(gridExtra)
 ```
 
 
@@ -447,134 +448,9 @@ ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
 
 # Pollutant Trends
 
-## PM 2.5
-
-### Colocation 
-
-#### Data Quality Check: Comparing PM 2.5 From Individual Monitors to Fleet Average
-
-```{r colocation monitor fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
-# hourly comparison
-compare_fleet_avg_monitor(pm25_colocation_hourly, "pm25", "hourly")
-
-# Daily comparison
-compare_fleet_avg_monitor(pm25_colocation_daily, "pm25", "daily")
-
-```
-
-#### PM 2.5 Trend Heatmap
-
-```{r colocation pm1 trends, echo=FALSE, message=FALSE, warning=FALSE}
-generate_heatmap(pm25_colocation_hourly, "pm25")
-```
-
-### Community Deployment
-
-#### Checking Individual Monitor to Fleet Average
-
-```{r monitor vs fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
-# hourly comparison
-compare_fleet_avg_monitor(pm25_community_hourly, "pm25", "hourly")
-
-# Daily comparison
-compare_fleet_avg_monitor(pm25_community_daily, "pm25", "daily")
-```
-
-#### PM 2.5 Trend Heatmap
-
-```{r pm1 trends, echo=FALSE, message=FALSE, warning=FALSE}
-generate_heatmap(pm25_community_hourly, "pm25")
-```
-
-
-
-#### Spatial Correlation
-
-```{r spatial correlation, echo=FALSE, message=FALSE, warning=FALSE}
-generate_spatial_pollution_map(pm25_community, "pm25", missing_monitor_location)
-```
-
-#### Calculate Moran I for Spatial Correlation
-
-```{r moran i, echo=FALSE, message=FALSE, warning=FALSE}
-calculate_moran_i(pm25_community, "pm25", missing_monitor_location)
-```
-
-**Interpretation of Moran I Statistic**
-
--   -1: The variable of interest is perfectly dispersed
-
--   0: The variable of interest is randomly dispersed
-
--   1: The variable of interest is perfectly clustered together
-
-#### Including proximity to road
-
-```{r road, echo=FALSE, message=FALSE, warning=FALSE}
-
-monitor_sf_road_dist <- prep_monitor_road_data(pm25_community, "pm25", missing_monitor_location, roads)
-
-generate_spatial_pollution_road_map(monitor_sf_road_dist, roads_filtered, "pm25")
-
-pm25_regression_results <- regress_polutant_road(monitor_sf_road_dist, "pm25")
-
-print(pm25_regression_results$plot)
-print(pm25_regression_results$summary_table)
-
-```
-
-
-
-
-
-
-
-
-
 ## Grand Average plots 
 
 ```{r}
-ghana_pm1 %>%
-  group_by(date, monitor) %>%
-  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
-  ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
-  geom_line(color = "black", alpha = 0.2) +
-  theme_minimal() +
-  labs(y = "Mean PM 1",
-       title = "Average PM 1 Accross All Devices")
-
-ghana_pm1 %>%
-  filter(hour >= 15 & hour < 18) %>%
-  group_by(monitor, date) %>%
-  summarise(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
-  ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
-  geom_line(color = "black", alpha = 0.4) +
-  theme_minimal() +
-  labs(y = "Mean PM 1 ",
-       title = "Daily Average PM 1 for Each Monitor During Primary Cooking Hours (3-7)") 
-
-
-ghana_pm1 %>%
-  group_by(date) %>%
-  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
-  ggplot(aes(x = date, y = mean_pm1)) +
-  geom_line() +
-  theme_minimal() +
-  labs(y = "Mean PM 1",
-       title = "Average PM 1 Accross All Devices")
-
-ghana_pm1 %>%
-  filter(hour >= 15 & hour < 18) %>%
-  group_by(date) %>%
-  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
-  ggplot(aes(x = date, y = mean_pm1)) +
-  geom_line() +
-  theme_minimal() +
-  labs(y = "Mean PM 1",
-       title = "Mean PM 1 Accross All Devices During Cooking Hours (3-7)")
-
-
-
 daily_pollutants <- left_join(pm1_community_daily, pm25_community_daily) %>% 
   left_join(pm10_community_daily)
 
@@ -607,6 +483,364 @@ daily_pollutants_long %>%
        y = "Pollutant Measurement",
        title = "Average Daily Particulate Matter Levels Across All Monitors") +
   facet_grid(pollutant ~ ., scales = "free_y")
+```
+
+## PM 2.5
+
+### Colocation 
+
+#### Data Quality Check: Comparing PM 2.5 From Individual Monitors to Fleet Average
+
+```{r colocation monitor fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm25_colocation_hourly, "pm25", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm25_colocation_daily, "pm25", "daily")
+```
+
+#### PM 2.5 Trend Heatmap
+
+```{r colocation pm25 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm25_colocation_hourly, "pm25")
+```
+
+### Community Deployment
+
+#### Checking Individual Monitor to Fleet Average
+
+```{r monitor vs fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm25_community_hourly, "pm25", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm25_community_daily, "pm25", "daily")
+```
+
+#### PM 2.5 Trend Heatmap
+
+```{r pm25 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm25_community_hourly, "pm25")
+```
+
+
+```{r pm25 timelines, echo=FALSE, message=FALSE, warning=FALSE}
+daily_pm1_all_devices <- ghana_pm1 %>%
+  group_by(date, monitor) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
+  geom_line(color = "black", alpha = 0.2) +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Average PM 1 Accross All Devices")
+
+daily_cooktime_pm1_all_devices <- ghana_pm1 %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(monitor, date) %>%
+  summarise(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
+  geom_line(color = "black", alpha = 0.4) +
+  theme_minimal() +
+  labs(y = "Mean PM 1 ",
+       title = "Daily Average PM 1 for Each Monitor During Primary Cooking Hours (3-7)") 
+
+grid.arrange(daily_pm1_all_devices, daily_cooktime_pm1_all_devices)
+
+daily_pm1_timeline <- ghana_pm1 %>%
+  group_by(date) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Average PM 1 Accross All Devices")
+
+daily_cooktime_pm1_timeline <- ghana_pm1 %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(date) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Mean PM 1 Accross All Devices During Cooking Hours (3-7)")
+
+grid.arrange(daily_pm1_timeline, daily_cooktime_pm1_timeline)
+```
+
+
+#### Spatial Correlation
+
+```{r spatial correlation, echo=FALSE, message=FALSE, warning=FALSE}
+generate_spatial_pollution_map(pm25_community, "pm25", missing_monitor_location)
+```
+
+#### Calculate Moran I for Spatial Correlation
+
+```{r moran i, echo=FALSE, message=FALSE, warning=FALSE}
+calculate_moran_i(pm25_community, "pm25", missing_monitor_location)
+```
+
+**Interpretation of Moran I Statistic**
+
+-   -1: The variable of interest is perfectly dispersed
+
+-   0: The variable of interest is randomly dispersed
+
+-   1: The variable of interest is perfectly clustered together
+
+#### Including proximity to road
+
+```{r road, echo=FALSE, message=FALSE, warning=FALSE}
+monitor_sf_road_dist <- prep_monitor_road_data(pm25_community, "pm25", missing_monitor_location, roads)
+
+generate_spatial_pollution_road_map(monitor_sf_road_dist, roads_filtered, "pm25")
+
+pm25_regression_results <- regress_polutant_road(monitor_sf_road_dist, "pm25")
+
+print(pm25_regression_results$plot)
+print(pm25_regression_results$summary_table)
+```
+
+
+
+
+
+## PM 1
+
+### Colocation 
+
+#### Data Quality Check: Comparing PM 1 From Individual Monitors to Fleet Average
+
+```{r colocation monitor fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm1_colocation_hourly, "pm1", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm1_colocation_daily, "pm1", "daily")
+```
+
+#### PM 1 Trend Heatmap
+
+```{r colocation pm1 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm1_colocation_hourly, "pm1")
+```
+
+### Community Deployment
+
+#### Checking Individual Monitor to Fleet Average
+
+```{r monitor vs fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm1_community_hourly, "pm1", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm1_community_daily, "pm1", "daily")
+```
+
+#### PM 1 Trend Heatmap
+
+```{r pm1 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm1_community_hourly, "pm1")
+```
+
+
+```{r pm1 timelines, echo=FALSE, message=FALSE, warning=FALSE}
+daily_pm1_all_devices <- ghana_pm1 %>%
+  group_by(date, monitor) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
+  geom_line(color = "black", alpha = 0.2) +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Average PM 1 Accross All Devices")
+
+daily_cooktime_pm1_all_devices <- ghana_pm1 %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(monitor, date) %>%
+  summarise(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1, group = monitor)) +
+  geom_line(color = "black", alpha = 0.4) +
+  theme_minimal() +
+  labs(y = "Mean PM 1 ",
+       title = "Daily Average PM 1 for Each Monitor During Primary Cooking Hours (3-7)") 
+
+grid.arrange(daily_pm1_all_devices, daily_cooktime_pm1_all_devices)
+
+daily_pm1_timeline <- ghana_pm1 %>%
+  group_by(date) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Average PM 1 Accross All Devices")
+
+daily_cooktime_pm1_timeline <- ghana_pm1 %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(date) %>%
+  summarize(mean_pm1 = mean(pm1, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm1)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 1",
+       title = "Mean PM 1 Accross All Devices During Cooking Hours (3-7)")
+
+grid.arrange(daily_pm1_timeline, daily_cooktime_pm1_timeline)
+```
+
+
+#### Spatial Correlation
+
+```{r spatial correlation, echo=FALSE, message=FALSE, warning=FALSE}
+generate_spatial_pollution_map(pm1_community, "pm1", missing_monitor_location)
+```
+
+#### Calculate Moran I for Spatial Correlation
+
+```{r moran i, echo=FALSE, message=FALSE, warning=FALSE}
+calculate_moran_i(pm1_community, "pm1", missing_monitor_location)
+```
+
+**Interpretation of Moran I Statistic**
+
+-   -1: The variable of interest is perfectly dispersed
+
+-   0: The variable of interest is randomly dispersed
+
+-   1: The variable of interest is perfectly clustered together
+
+#### Including proximity to road
+
+```{r road, echo=FALSE, message=FALSE, warning=FALSE}
+monitor_sf_road_dist <- prep_monitor_road_data(pm1_community, "pm1", missing_monitor_location, roads)
+
+generate_spatial_pollution_road_map(monitor_sf_road_dist, roads_filtered, "pm1")
+
+pm1_regression_results <- regress_polutant_road(monitor_sf_road_dist, "pm1")
+
+print(pm1_regression_results$plot)
+print(pm1_regression_results$summary_table)
+```
+
+
+
+
+## PM 10
+
+### Colocation 
+
+#### Data Quality Check: Comparing PM 10 From Individual Monitors to Fleet Average
+
+```{r colocation monitor fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm10_colocation_hourly, "pm10", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm10_colocation_daily, "pm10", "daily")
+```
+
+#### PM 10 Trend Heatmap
+
+```{r colocation pm10 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm10_colocation_hourly, "pm10")
+```
+
+### Community Deployment
+
+#### Checking Individual Monitor to Fleet Average
+
+```{r monitor vs fleet avg, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm10_community_hourly, "pm10", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm10_community_daily, "pm10", "daily")
+```
+
+#### PM 10 Trend Heatmap
+
+```{r pm10 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm10_community_hourly, "pm10")
+```
+
+
+```{r pm10 timeline, echo=FALSE, message=FALSE, warning=FALSE}
+daily_pm10_all_devices <- ghana_pm10 %>%
+  group_by(date, monitor) %>%
+  summarize(mean_pm10 = mean(pm10, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm10, group = monitor)) +
+  geom_line(color = "black", alpha = 0.2) +
+  theme_minimal() +
+  labs(y = "Mean PM 10",
+       title = "Average PM 10 Accross All Devices")
+
+daily_cooktime_pm10_all_devices <- ghana_pm10 %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(monitor, date) %>%
+  summarise(mean_pm10 = mean(pm10, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm10, group = monitor)) +
+  geom_line(color = "black", alpha = 0.4) +
+  theme_minimal() +
+  labs(y = "Mean PM 10 ",
+       title = "Daily Average PM 10 for Each Monitor During Primary Cooking Hours (3-7)") 
+
+grid.arrange(daily_pm10_all_devices, daily_cooktime_pm10_all_devices)
+
+daily_pm10_timeline <- ghana_pm10 %>%
+  group_by(date) %>%
+  summarize(mean_pm10 = mean(pm10, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm10)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 10",
+       title = "Average PM 10 Accross All Devices")
+
+daily_cooktime_pm10_timeline <- ghana_pm10 %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(date) %>%
+  summarize(mean_pm10 = mean(pm10, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm10)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 10",
+       title = "Mean PM 10 Accross All Devices During Cooking Hours (3-7)")
+
+grid.arrange(daily_pm10_timeline, daily_cooktime_pm10_timeline)
+```
+
+
+#### Spatial Correlation
+
+```{r spatial correlation, echo=FALSE, message=FALSE, warning=FALSE}
+generate_spatial_pollution_map(pm10_community, "pm10", missing_monitor_location)
+```
+
+#### Calculate Moran I for Spatial Correlation
+
+```{r moran i, echo=FALSE, message=FALSE, warning=FALSE}
+calculate_moran_i(pm10_community, "pm10", missing_monitor_location)
+```
+
+**Interpretation of Moran I Statistic**
+
+-   -1: The variable of interest is perfectly dispersed
+
+-   0: The variable of interest is randomly dispersed
+
+-   1: The variable of interest is perfectly clustered together
+
+#### Including proximity to road
+
+```{r road, echo=FALSE, message=FALSE, warning=FALSE}
+monitor_sf_road_dist <- prep_monitor_road_data(pm10_community, "pm10", missing_monitor_location, roads)
+
+generate_spatial_pollution_road_map(monitor_sf_road_dist, roads_filtered, "pm10")
+
+pm10_regression_results <- regress_polutant_road(monitor_sf_road_dist, "pm10")
+
+print(pm10_regression_results$plot)
+print(pm10_regression_results$summary_table)
 ```
 
 
