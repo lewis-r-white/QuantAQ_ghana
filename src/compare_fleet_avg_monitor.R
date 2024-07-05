@@ -1,7 +1,7 @@
 library(dplyr)
 library(ggplot2)
 
-compare_fleet_avg_monitor <- function(data, pollutant, period = "hourly") {
+compare_fleet_avg_monitor <- function(data, pollutant, period = "hourly", ncol = 5) {
   mean_col <- paste0("mean_", pollutant)
   fleet_col <- paste0("fleet_average_", pollutant)
   
@@ -36,14 +36,12 @@ compare_fleet_avg_monitor <- function(data, pollutant, period = "hourly") {
     stop("Invalid period specified. Please choose either 'hourly' or 'daily'.")
   }
   
-  
   # Plot comparison
   ggplot(data_full, aes(x = !!sym(fleet_col), y = !!sym(mean_col))) +
     geom_point(alpha = 0.3) +
-    facet_wrap(~monitor) +
+    facet_wrap(~monitor, ncol = ncol) +
     theme_bw() +
-    labs(x = paste(toupper(period), toupper(pollutant), "Fleet Average"),
-         y = paste(toupper(period), "Monitor", toupper(pollutant), "Average"),
-         title = paste("Comparing", toupper(period), toupper(pollutant), "Average for Individual Monitor to", toupper(period), "Fleet Average"))
+    labs(x = paste(str_to_title(period), toupper(pollutant), "Fleet Average"),
+         y = paste(str_to_title(period), "Monitor", toupper(pollutant), "Average"),
+         title = paste("Comparing", str_to_title(period), toupper(pollutant), "Average for Individual Monitor to", str_to_title(period), "\nFleet Average"))
 }
-
