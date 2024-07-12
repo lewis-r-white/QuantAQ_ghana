@@ -12,7 +12,16 @@ regress_polutant_road <- function(data, pollutant) {
          y = paste("Average", toupper(pollutant), "Reading")) +
     theme_minimal()
   
-  summary_table <- modelsummary(regression_model)
+  model_name <- paste("Mean", toupper(pollutant), "Regressed on Distance to Road")
+  model_list <- setNames(list(regression_model), model_name)
+  
+  summary_table <- modelsummary(
+    model_list, 
+    coef_rename = c("distance_to_road" = "Distance to Road"),
+    gof_omit = "AIC|BIC|Log.Lik",
+    estimate = "{estimate} ({std.error}){stars}",
+    statistic = "p.value"
+  )
   
   list(plot = plot, summary_table = summary_table)
 }

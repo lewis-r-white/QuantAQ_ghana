@@ -1,6 +1,9 @@
 ---
 title: "Ghana Air Quality Analysis"
-output: html_document
+output: 
+  html_document:
+    toc: true
+    theme: united
 date: "2024-06-13"
 ---
 
@@ -25,6 +28,11 @@ library(spdep)
 library(gstat)
 library(units) 
 library(gridExtra)
+
+library(broom)
+library(Metrics)
+library(kableExtra)
+
 ```
 
 
@@ -57,6 +65,9 @@ source(here("src", "generate_spatial_pollution_road_map.R"))
 
 # source function to run regression analysis on pollutant / distance to road
 source(here("src", "regress_pollutant_road.R"))
+
+# source function to apply regressions when comparing monitor to fleet average
+source(here("src", "compare_fleet_regression.R"))
 
 ```
 
@@ -142,8 +153,8 @@ for (pollutant in pollutants) {
   colocation_data <- get(paste0(pollutant, "_colocation"))
   community_data <- get(paste0(pollutant, "_community"))
   
-  colocation_summary <- summarize_data(colocation_data, pollutant)
-  community_summary <- summarize_data(community_data, pollutant)
+  colocation_summary <- summarize_pollution_times(colocation_data, pollutant)
+  community_summary <- summarize_pollution_times(community_data, pollutant)
   
   results[[paste0(pollutant, "_colocation_hourly")]] <- colocation_summary$hourly
   results[[paste0(pollutant, "_colocation_daily")]] <- colocation_summary$daily
@@ -164,6 +175,59 @@ pm10_community_hourly <- results$pm10_community_hourly
 pm10_community_daily <- results$pm10_community_daily
 pm25_community_hourly <- results$pm25_community_hourly
 pm25_community_daily <- results$pm25_community_daily
+
+
+
+library(data.table)
+library(dplyr)
+
+load_pollution_datasets <- function(pollutant) {
+  columns <- c("monitor", "timestamp", "date", "hour", pollutant)
+  
+  data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", 
+                select = columns, showProgress = TRUE)
+  
+  colocation_data <- data %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+  
+  community_data <- data %>% filter(date >= as.Date("2023-09-26"))
+  
+  assign(paste0(pollutant, "_colocation"), colocation_data, envir = .GlobalEnv)
+  assign(paste0(pollutant, "_community"), community_data, envir = .GlobalEnv)
+}
+
+# Define the pollutants of interest
+gasses <- c("co", "no", "no2", "o3")
+
+# Define the list to store results
+results <- list()
+
+# Load and summarize the data for each gas
+for (gas in gasses) {
+  cat("Loading data for:", gas, "\n")
+  load_pollution_datasets(gas) 
+  
+  colocation_data_name <- paste0(gas, "_colocation")
+  community_data_name <- paste0(gas, "_community")
+  
+  if (exists(colocation_data_name) && exists(community_data_name)) {
+    colocation_data <- get(colocation_data_name)
+    community_data <- get(community_data_name)
+    
+    colocation_summary <- summarize_pollution_times(colocation_data, gas)
+    community_summary <- summarize_pollution_times(community_data, gas)
+    
+    results[[paste0(gas, "_colocation_hourly")]] <- colocation_summary$hourly
+    results[[paste0(gas, "_colocation_daily")]] <- colocation_summary$daily
+    results[[paste0(gas, "_community_hourly")]] <- community_summary$hourly
+    results[[paste0(gas, "_community_daily")]] <- community_summary$daily
+  } else {
+    warning(paste("Data for", gas, "not found."))
+  }
+}
+
+# Check the results
+str(results)
+
 ```
 
 
@@ -411,9 +475,49 @@ ggplot() +
        y = "") +
   theme_bw() +
   scale_color_gradient(low = "#0540a1", high = "#eb4c2d", name = "Missing Rate (%)")
+```
 
+### Spatial Correlation of Missing Data 
+```{r spatial missing data, echo=FALSE, message=FALSE, warning=FALSE}
+# Convert to an sf object
+missing_monitor_location <- st_as_sf(missing_monitor_location)
 
+coords <- st_coordinates(missing_monitor_location)
+nb <- knn2nb(knearneigh(coords, k = 5)) # k-nearest neighbors
+listw <- nb2listw(nb, style = "W")
+  
+# Calculate Moran's I
+moran_result <- moran.test(missing_monitor_location$missing_rate, listw)
 
+# Extract relevant values directly
+observed_value <- as.numeric(moran_result$estimate["Moran I statistic"])
+expected_value <- as.numeric(moran_result$estimate["Expectation"])
+variance <- as.numeric(moran_result$estimate["Variance"])
+z_score <- as.numeric(moran_result$statistic)
+p_value <- as.numeric(moran_result$p.value)
+
+# Create the Moran's I results table
+moran_table <- data.frame(
+  Test = "Moran's I Statistic",
+  `Observed Value` = observed_value,
+  `Expected Value` = expected_value,
+  `Variance` = variance,
+  `Z-score` = z_score,
+  `p-value` = p_value
+)
+
+moran_table
+```
+
+**Interpretation of Moran I Statistic**
+
+-   -1: The variable of interest is perfectly dispersed
+
+-   0: The variable of interest is randomly dispersed
+
+-   1: The variable of interest is perfectly clustered together
+
+```{r missingness heat map, fig.height=16, fig.width=9, echo=FALSE, message=FALSE, warning=FALSE}
 ## HEATMAP OF MISSINGNESS PER DAY FOR EACH MONITOR ----
 pm1_community_with_week <- pm1_community %>%
   mutate(week = floor_date(date, "week")) # Extract the week
@@ -426,9 +530,6 @@ daily_na <- pm1_community_with_week %>%
   mutate(week = floor_date(date, "week"),  # Extract the week again for plotting
          day_of_week = factor(weekdays(date), 
                               levels = c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")))  # Reorder days of the week
-```
-
-```{r missingness heat map, fig.height=16, fig.width=9, echo=FALSE, message=FALSE, warning=FALSE}
 
 ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
   geom_tile(color = "white") +
@@ -443,7 +544,6 @@ ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_wrap(~ monitor, scales = "free_x", ncol = 5)
 ```
-
 
 
 # Pollutant Trends
@@ -485,6 +585,129 @@ daily_pollutants_long %>%
   facet_grid(pollutant ~ ., scales = "free_y")
 ```
 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+mod_sep_daily_pollutants_long <- daily_pollutants %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date) %>%
+  summarize(across(where(is.numeric), list(mean = mean), na.rm = TRUE)) %>%
+  ungroup() %>%
+  rename("Mean PM 1" = mean_pm1_mean, 
+         "Mean PM 2.5" = mean_pm25_mean,
+         "Mean PM 10" = mean_pm10_mean) %>%
+  
+  pivot_longer(cols = c("Mean PM 1", "Mean PM 2.5", "Mean PM 10"), names_to = "pollutant", values_to = "measurement") %>%
+  
+  mutate(mod_pm = case_when(mod_pm == "FALSE" ~ "MOD Device",
+                            mod_pm == "TRUE" ~ "MOD-PM Device"))
+  
+
+mod_sep_daily_pollutants_long$pollutant <- factor(mod_sep_daily_pollutants_long$pollutant, levels = c("Mean PM 1", "Mean PM 2.5", "Mean PM 10"))
+  
+
+mod_sep_daily_pollutants_long %>%
+  ggplot(aes(x = date, y = measurement)) +
+  geom_line() +
+  theme_bw() +
+  labs(x = "Date",
+       y = "Pollutant Measurement",
+       title = "Average Daily Particulate Matter Levels Across Monitors",
+       subtitle = "Comparing MOD devices to MOD-PM devices") +
+  facet_grid(pollutant ~ mod_pm, scales = "free_y")
+```
+
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+summary_data <- daily_pollutants %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date) %>%
+  summarize(across(where(is.numeric), list(mean = mean), na.rm = TRUE), .groups = 'drop') %>%
+  ungroup() %>%
+  group_by(mod_pm, date) %>%
+  summarize(mean_pm1 = mean(mean_pm1_mean, na.rm = TRUE),
+            mean_pm25 = mean(mean_pm25_mean, na.rm = TRUE),
+            mean_pm10 = mean(mean_pm10_mean, na.rm = TRUE), .groups = 'drop') %>%
+  filter(mod_pm == TRUE)
+
+# Calculate distribution statistics
+distribution_stats <- summary_data %>%
+  summarize(Statistic = c("Min", "1st Qu.", "Median", "Mean", "3rd Qu.", "Max"),
+            PM1 = round(c(min(mean_pm1, na.rm = TRUE),
+                    quantile(mean_pm1, 0.25, na.rm = TRUE),
+                    median(mean_pm1, na.rm = TRUE),
+                    mean(mean_pm1, na.rm = TRUE),
+                    quantile(mean_pm1, 0.75, na.rm = TRUE),
+                    max(mean_pm1, na.rm = TRUE)), 2),
+            PM25 = round(c(min(mean_pm25, na.rm = TRUE),
+                     quantile(mean_pm25, 0.25, na.rm = TRUE),
+                     median(mean_pm25, na.rm = TRUE),
+                     mean(mean_pm25, na.rm = TRUE),
+                     quantile(mean_pm25, 0.75, na.rm = TRUE),
+                     max(mean_pm25, na.rm = TRUE)), 2),
+            PM10 = round(c(min(mean_pm10, na.rm = TRUE),
+                     quantile(mean_pm10, 0.25, na.rm = TRUE),
+                     median(mean_pm10, na.rm = TRUE),
+                     mean(mean_pm10, na.rm = TRUE),
+                     quantile(mean_pm10, 0.75, na.rm = TRUE),
+                     max(mean_pm10, na.rm = TRUE)), 2))
+
+# Create the table using kable and kableExtra
+kable(distribution_stats, format = "html", col.names = c("Statistic", "PM1", "PM2.5", "PM10")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE) %>%
+  add_header_above(c(" " = 1, "MOD-PM Device Pollutant Daily Distribution" = 3)) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE)
+
+
+
+
+
+
+# Assuming you have your summary data in a dataframe called summary_data
+summary_data <- daily_pollutants %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date) %>%
+  summarize(across(where(is.numeric), list(mean = mean), na.rm = TRUE), .groups = 'drop') %>%
+  ungroup() %>%
+  group_by(mod_pm, date) %>%
+  summarize(mean_pm1 = mean(mean_pm1_mean, na.rm = TRUE),
+            mean_pm25 = mean(mean_pm25_mean, na.rm = TRUE),
+            mean_pm10 = mean(mean_pm10_mean, na.rm = TRUE), .groups = 'drop') %>%
+  filter(mod_pm == FALSE)
+
+# Calculate distribution statistics
+distribution_stats <- summary_data %>%
+  summarize(Statistic = c("Min", "1st Qu.", "Median", "Mean", "3rd Qu.", "Max"),
+            PM1 = round(c(min(mean_pm1, na.rm = TRUE),
+                    quantile(mean_pm1, 0.25, na.rm = TRUE),
+                    median(mean_pm1, na.rm = TRUE),
+                    mean(mean_pm1, na.rm = TRUE),
+                    quantile(mean_pm1, 0.75, na.rm = TRUE),
+                    max(mean_pm1, na.rm = TRUE)), 2),
+            PM25 = round(c(min(mean_pm25, na.rm = TRUE),
+                     quantile(mean_pm25, 0.25, na.rm = TRUE),
+                     median(mean_pm25, na.rm = TRUE),
+                     mean(mean_pm25, na.rm = TRUE),
+                     quantile(mean_pm25, 0.75, na.rm = TRUE),
+                     max(mean_pm25, na.rm = TRUE)), 2),
+            PM10 = round(c(min(mean_pm10, na.rm = TRUE),
+                     quantile(mean_pm10, 0.25, na.rm = TRUE),
+                     median(mean_pm10, na.rm = TRUE),
+                     mean(mean_pm10, na.rm = TRUE),
+                     quantile(mean_pm10, 0.75, na.rm = TRUE),
+                     max(mean_pm10, na.rm = TRUE)), 2))
+
+# Create the table using kable and kableExtra
+kable(distribution_stats, format = "html", col.names = c("Statistic", "PM1", "PM2.5", "PM10")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE) %>%
+  add_header_above(c(" " = 1, "MOD Device Pollutant Daily Distribution" = 3)) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE)
+```
+
+
+
 ## PM 2.5 Colocation 
 
 ### Data Quality Check: Comparing PM 2.5 From Individual Monitors to Fleet Average
@@ -496,6 +719,77 @@ compare_fleet_avg_monitor(pm25_colocation_hourly, "pm25", "hourly")
 # Daily comparison
 compare_fleet_avg_monitor(pm25_colocation_daily, "pm25", "daily")
 ```
+
+#### PM 2.5 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm25_hourly_regression_data <- pm25_colocation_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm25))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm25_colocation_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm25))
+
+
+pm25_colocation_regression_results <- apply_regression(pm25_hourly_regression_data, "mean_pm25", "fleet_average_pm25")
+
+datatable(pm25_colocation_regression_results)
+```
+
+#### PM 2.5 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm25_daily_regression_data <- pm25_colocation_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm25))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm25_colocation_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm25))
+
+
+pm25_colocation_regression_results <- apply_regression(pm25_daily_regression_data, "mean_pm25", "fleet_average_pm25")
+
+datatable(pm25_colocation_regression_results)
+```
+
+### PM 2.5 Colocation MOD vs MOD-PM measures to check consistency
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+mod_pm_pm25 <- pm25_colocation_hourly %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date, hour) %>%
+  summarize(mean_hourly_pm = mean(mean_pm25, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(mod_pm == TRUE)
+
+mod_pm25 <- pm25_colocation_hourly %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date, hour) %>%
+  summarize(mean_hourly_pm = mean(mean_pm25, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(mod_pm == FALSE)
+
+# Extract the mean_hourly_pm vectors
+MOD_PM_pm25_means <- mod_pm_pm25$mean_hourly_pm
+MOD_pm25_means <- mod_pm25$mean_hourly_pm
+
+# Perform t-test
+t_test_result <- t.test(MOD_PM_pm25_means, MOD_pm25_means)
+
+# Print the result
+print(t_test_result)
+```
+
 
 ### PM 2.5 Trend Heatmap
 
@@ -513,6 +807,48 @@ compare_fleet_avg_monitor(pm25_community_hourly, "pm25", "hourly")
 
 # Daily comparison
 compare_fleet_avg_monitor(pm25_community_daily, "pm25", "daily")
+```
+
+#### PM 2.5 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm25_hourly_regression_data <- pm25_community_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm25))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm25_community_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm25))
+
+
+pm25_colocation_regression_results <- apply_regression(pm25_hourly_regression_data, "mean_pm25", "fleet_average_pm25")
+
+datatable(pm25_colocation_regression_results)
+```
+
+#### PM 2.5 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm25_daily_regression_data <- pm25_community_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm25))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm25_community_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm25))
+
+
+pm25_colocation_regression_results <- apply_regression(pm25_daily_regression_data, "mean_pm25", "fleet_average_pm25")
+
+datatable(pm25_colocation_regression_results)
 ```
 
 
@@ -615,6 +951,78 @@ compare_fleet_avg_monitor(pm1_colocation_hourly, "pm1", "hourly")
 compare_fleet_avg_monitor(pm1_colocation_daily, "pm1", "daily")
 ```
 
+#### PM 1 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm1_hourly_regression_data <- pm1_colocation_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm1))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm1_colocation_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm1))
+
+
+pm1_colocation_regression_results <- apply_regression(pm1_hourly_regression_data, "mean_pm1", "fleet_average_pm1")
+
+datatable(pm1_colocation_regression_results)
+```
+
+#### PM 1 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm1_daily_regression_data <- pm1_colocation_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm1))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm1_colocation_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm1))
+
+
+pm1_colocation_regression_results <- apply_regression(pm1_daily_regression_data, "mean_pm1", "fleet_average_pm1")
+
+datatable(pm1_colocation_regression_results)
+```
+
+### PM 1 Colocation MOD vs MOD-PM measures to check consistency
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+mod_pm_pm1 <- pm1_colocation_hourly %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date, hour) %>%
+  summarize(mean_hourly_pm = mean(mean_pm1, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(mod_pm == TRUE)
+
+mod_pm1 <- pm1_colocation_hourly %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date, hour) %>%
+  summarize(mean_hourly_pm = mean(mean_pm1, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(mod_pm == FALSE)
+
+# Extract the mean_hourly_pm vectors
+MOD_PM_hourly_pm1_means <- mod_pm_pm1$mean_hourly_pm
+MOD_hourly_pm1_means <- mod_pm1$mean_hourly_pm
+
+# Perform t-test
+t_test_result <- t.test(MOD_PM_hourly_pm1_means, MOD_hourly_pm1_means)
+
+# Print the result
+print(t_test_result)
+```
+
+
+
 ### PM 1 Trend Heatmap
 
 ```{r colocation pm1 trends, echo=FALSE, message=FALSE, warning=FALSE}
@@ -632,6 +1040,49 @@ compare_fleet_avg_monitor(pm1_community_hourly, "pm1", "hourly")
 # Daily comparison
 compare_fleet_avg_monitor(pm1_community_daily, "pm1", "daily")
 ```
+
+#### PM 1 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm1_hourly_regression_data <- pm1_community_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm1))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm1_community_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm1))
+
+
+pm1_colocation_regression_results <- apply_regression(pm1_hourly_regression_data, "mean_pm1", "fleet_average_pm1")
+
+datatable(pm1_colocation_regression_results)
+```
+
+#### PM 1 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm1_daily_regression_data <- pm1_community_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm1))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm1_community_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm1))
+
+
+pm1_colocation_regression_results <- apply_regression(pm1_daily_regression_data, "mean_pm1", "fleet_average_pm1")
+
+datatable(pm1_colocation_regression_results)
+```
+
 
 ### PM 1 Trends
 
@@ -735,6 +1186,79 @@ compare_fleet_avg_monitor(pm10_colocation_hourly, "pm10", "hourly")
 compare_fleet_avg_monitor(pm10_colocation_daily, "pm10", "daily")
 ```
 
+#### PM 10 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_hourly_regression_data <- pm10_colocation_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm10))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm10_colocation_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm10))
+
+
+pm10_colocation_regression_results <- apply_regression(pm10_hourly_regression_data, "mean_pm10", "fleet_average_pm10")
+
+datatable(pm10_colocation_regression_results)
+```
+
+#### PM 10 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_daily_regression_data <- pm10_colocation_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm10))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm10_colocation_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm10))
+
+
+pm10_colocation_regression_results <- apply_regression(pm10_daily_regression_data, "mean_pm10", "fleet_average_pm10")
+
+datatable(pm10_colocation_regression_results)
+```
+
+
+### PM 10 Colocation MOD vs MOD-PM measures to check consistency
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+mod_pm_pm10 <- pm10_colocation_hourly %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date, hour) %>%
+  summarize(mean_hourly_pm = mean(mean_pm10, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(mod_pm == TRUE)
+
+mod_pm10 <- pm10_colocation_hourly %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date, hour) %>%
+  summarize(mean_hourly_pm = mean(mean_pm10, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(mod_pm == FALSE)
+
+# Extract the mean_hourly_pm vectors
+MOD_PM_pm10_means <- mod_pm_pm10$mean_hourly_pm
+MOD_pm10_means <- mod_pm10$mean_hourly_pm
+
+# Perform t-test
+t_test_result <- t.test(MOD_PM_pm10_means, MOD_pm10_means)
+
+# Print the result
+print(t_test_result)
+```
+
+
+
 ### PM 10 Trend Heatmap
 
 ```{r colocation pm10 trends, echo=FALSE, message=FALSE, warning=FALSE}
@@ -751,6 +1275,49 @@ compare_fleet_avg_monitor(pm10_community_hourly, "pm10", "hourly")
 
 # Daily comparison
 compare_fleet_avg_monitor(pm10_community_daily, "pm10", "daily")
+```
+
+
+#### PM 10 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_hourly_regression_data <- pm10_community_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm10))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm10_community_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm10))
+
+
+pm10_colocation_regression_results <- apply_regression(pm10_hourly_regression_data, "mean_pm10", "fleet_average_pm10")
+
+datatable(pm10_colocation_regression_results)
+```
+
+#### PM 10 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_daily_regression_data <- pm10_community_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm10))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm10_community_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm10))
+
+
+pm10_colocation_regression_results <- apply_regression(pm10_daily_regression_data, "mean_pm10", "fleet_average_pm10")
+
+datatable(pm10_colocation_regression_results)
 ```
 
 
@@ -840,3 +1407,270 @@ pm10_regression_results$summary_table
 ```
 
 
+
+## PM 10 Colocation Revisited Without Outliers (All pollution levels above 1000 set to 1000)
+```{r recalc pm10 data no outlier, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_colocation <- pm10_colocation %>%
+  mutate(pm10 = case_when(pm10 > 1000 ~ 1000,
+                          TRUE ~ pm10))
+
+pm10_colocation_hourly <- pm10_colocation_hourly %>%
+  mutate(mean_pm10 = case_when(mean_pm10 > 1000 ~ 1000,
+                          TRUE ~ mean_pm10)) %>%
+  mutate(fleet_average_pm10 = case_when(fleet_average_pm10 > 1000 ~ 1000,
+                                        TRUE ~ fleet_average_pm10))
+
+pm10_colocation_daily <- pm10_colocation_daily %>%
+  mutate(mean_pm10 = case_when(mean_pm10 > 1000 ~ 1000,
+                          TRUE ~ mean_pm10)) %>%
+  mutate(fleet_average_pm10 = case_when(fleet_average_pm10 > 1000 ~ 1000,
+                                        TRUE ~ fleet_average_pm10))
+
+
+pm10_community <- pm10_community %>%
+  mutate(pm10 = case_when(pm10 > 1000 ~ 1000,
+                          TRUE ~ pm10))
+
+pm10_community_hourly <- pm10_community_hourly %>%
+  mutate(mean_pm10 = case_when(mean_pm10 > 1000 ~ 1000,
+                          TRUE ~ mean_pm10)) %>%
+  mutate(fleet_average_pm10 = case_when(fleet_average_pm10 > 1000 ~ 1000,
+                                        TRUE ~ fleet_average_pm10))
+
+pm10_community_daily <- pm10_community_daily %>%
+  mutate(mean_pm10 = case_when(mean_pm10 > 1000 ~ 1000,
+                          TRUE ~ mean_pm10)) %>%
+  mutate(fleet_average_pm10 = case_when(fleet_average_pm10 > 1000 ~ 1000,
+                                        TRUE ~ fleet_average_pm10))
+```
+
+### Data Quality Check: Comparing PM 10 From Individual Monitors to Fleet Average
+
+```{r colocation monitor fleet avg 10 no outlier, fig.height=10, fig.width=7, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm10_colocation_hourly, "pm10", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm10_colocation_daily, "pm10", "daily")
+```
+
+
+#### PM 10 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_hourly_regression_data <- pm10_colocation_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm10))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm10_colocation_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm10))
+
+
+pm10_colocation_regression_results <- apply_regression(pm10_hourly_regression_data, "mean_pm10", "fleet_average_pm10")
+
+datatable(pm10_colocation_regression_results)
+```
+
+#### PM 10 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_daily_regression_data <- pm10_colocation_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm10))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm10_colocation_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm10))
+
+
+pm10_colocation_regression_results <- apply_regression(pm10_daily_regression_data, "mean_pm10", "fleet_average_pm10")
+
+datatable(pm10_colocation_regression_results)
+```
+
+
+### PM 10 Colocation MOD vs MOD-PM measures to check consistency
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+mod_pm_pm10 <- pm10_colocation_hourly %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date, hour) %>%
+  summarize(mean_hourly_pm = mean(mean_pm10, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(mod_pm == TRUE)
+
+mod_pm10 <- pm10_colocation_hourly %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  group_by(mod_pm, date, hour) %>%
+  summarize(mean_hourly_pm = mean(mean_pm10, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(mod_pm == FALSE)
+
+# Extract the mean_hourly_pm vectors
+MOD_PM_pm10_means <- mod_pm_pm10$mean_hourly_pm
+MOD_pm10_means <- mod_pm10$mean_hourly_pm
+
+# Perform t-test
+t_test_result <- t.test(MOD_PM_pm10_means, MOD_pm10_means)
+
+# Print the result
+print(t_test_result)
+```
+
+
+### PM 10 Trend Heatmap
+
+```{r colocation pm10 trends no outlier, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm10_colocation_hourly, "pm10")
+```
+
+
+## PM 10 Community Revisited Without Outliers (All pollution levels above 1000 set to 1000)
+
+### Checking Individual Monitor to Fleet Average
+
+```{r monitor vs fleet avg 10 no outlier, fig.height=10, fig.width=7, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm10_community_hourly, "pm10", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm10_community_daily, "pm10", "daily")
+```
+
+
+#### PM 10 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_hourly_regression_data <- pm10_community_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm10))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm10_community_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm10))
+
+
+pm10_colocation_regression_results <- apply_regression(pm10_hourly_regression_data, "mean_pm10", "fleet_average_pm10")
+
+datatable(pm10_colocation_regression_results)
+```
+
+#### PM 10 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm10_daily_regression_data <- pm10_community_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm10))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm10_community_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm10))
+
+
+pm10_colocation_regression_results <- apply_regression(pm10_daily_regression_data, "mean_pm10", "fleet_average_pm10")
+
+datatable(pm10_colocation_regression_results)
+```
+
+
+### PM 10 Trends
+
+```{r pm10 timeline no outlier, echo=FALSE, message=FALSE, warning=FALSE}
+daily_pm10_all_devices <- pm10_community %>%
+  group_by(date, monitor) %>%
+  summarize(mean_pm10 = mean(pm10, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm10, group = monitor)) +
+  geom_line(color = "black", alpha = 0.2) +
+  theme_minimal() +
+  labs(y = "Mean PM 10",
+       title = "Average PM 10 Accross All Devices")
+
+daily_cooktime_pm10_all_devices <- pm10_community %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(monitor, date) %>%
+  summarise(mean_pm10 = mean(pm10, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm10, group = monitor)) +
+  geom_line(color = "black", alpha = 0.4) +
+  theme_minimal() +
+  labs(y = "Mean PM 10 ",
+       title = "Daily Average PM 10 for Each Monitor During Primary Cooking Hours (3-7)") 
+
+grid.arrange(daily_pm10_all_devices, daily_cooktime_pm10_all_devices)
+
+daily_pm10_timeline <- pm10_community %>%
+  group_by(date) %>%
+  summarize(mean_pm10 = mean(pm10, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm10)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 10",
+       title = "Average PM 10 Accross All Devices")
+
+daily_cooktime_pm10_timeline <- pm10_community %>%
+  filter(hour >= 15 & hour < 18) %>%
+  group_by(date) %>%
+  summarize(mean_pm10 = mean(pm10, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm10)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 10",
+       title = "Mean PM 10 Accross All Devices During Cooking Hours (3-7)")
+
+grid.arrange(daily_pm10_timeline, daily_cooktime_pm10_timeline)
+```
+
+### PM 10 Trend Heatmap
+
+```{r pm10 trends no outlier, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm10_community_hourly, "pm10")
+```
+
+### Spatial Correlation
+
+```{r spatial correlation 10 no outlier, echo=FALSE, message=FALSE, warning=FALSE}
+generate_spatial_pollution_map(pm10_community, "pm10", missing_monitor_location)
+```
+
+### Calculate Moran I for Spatial Correlation
+
+```{r moran i 10 no outlier, echo=FALSE, message=FALSE, warning=FALSE}
+calculate_moran_i(pm10_community, "pm10", missing_monitor_location)
+```
+
+**Interpretation of Moran I Statistic**
+
+-   -1: The variable of interest is perfectly dispersed
+
+-   0: The variable of interest is randomly dispersed
+
+-   1: The variable of interest is perfectly clustered together
+
+### Including proximity to road
+
+```{r road 10 no outlier, echo=FALSE, message=FALSE, warning=FALSE}
+monitor_sf_road_dist <- prep_monitor_road_data(pm10_community, "pm10", missing_monitor_location, roads)
+
+generate_spatial_pollution_road_map(monitor_sf_road_dist, roads_filtered, "pm10")
+
+pm10_regression_results <- regress_polutant_road(monitor_sf_road_dist, "pm10")
+
+pm10_regression_results$plot
+pm10_regression_results$summary_table
+```

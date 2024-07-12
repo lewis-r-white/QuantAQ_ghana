@@ -1,6 +1,6 @@
 library(dplyr)
 
-summarize_data <- function(data, pollutant) {
+summarize_pollution_times <- function(data, pollutant) {
   mean_col <- paste0("mean_", pollutant)
   fleet_col <- paste0("fleet_average_", pollutant)
   
