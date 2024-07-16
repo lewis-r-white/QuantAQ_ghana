@@ -679,13 +679,21 @@ full_sd_card = rbind(MOD_sd_card, MOD_PM_sd_card)
 # List of pollutants you want to process
 pollutants <- c("pm1", "pm25", "pm10")
 
+raw_data <- list()
+
+for (pollutant in pollutants) {
+  load_pollution_datasets(pollutant)
+  # Store the raw data
+  raw_data[[paste0(pollutant, "_raw")]] <- get(paste0(pollutant, "_raw"))
+}
+
 # Process the pollutants
 results <- process_multiple_pollutants(pollutants, raw_data, full_sd_card)
 
 pm1_colocation_hourly <- results$pm1$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
 pm1_colocation_daily <- results$pm1$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
 pm10_colocation_hourly <- results$pm10$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
-pm10_colocation_daily <- results$pm1$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm10_colocation_daily <- results$pm10$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
 pm25_colocation_hourly <- results$pm25$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
 pm25_colocation_daily <- results$pm25$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
 pm1_community_hourly <- results$pm1$hourly %>% filter(date >= as.Date("2023-09-26"))
@@ -1838,63 +1846,62 @@ Questions:
 * The spatial stuff doesn't make sense to include here, right?
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-co_colocation_daily %>%
-  ggplot(aes(x = date, y = mean_co)) +
-  geom_line() +
-  facet_wrap(~monitor)
+plot_daily_mean_pollutant <- function(data, pollutant_measurement, title = NULL) {
+  pollutant_col <- sym(paste0("mean_", pollutant_measurement))
+  
+  ggplot(data, aes(x = date, y = !!pollutant_col)) +
+    geom_line() +
+    facet_wrap(~monitor, ncol = 2) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Rotate x-axis labels
+    labs(x = "Date",
+         y = paste("Daily Mean", toupper(pollutant_measurement)),
+         title = title)
+}
 
-co_community_daily %>%
-  ggplot(aes(x = date, y = mean_co)) +
-  geom_line() +
-  facet_wrap(~monitor)
+plot_co_col_time <- plot_daily_mean_pollutant(co_colocation_daily, "co", "Colocation Daily Mean CO by Monitor over Time")
 
-no_colocation_daily %>%
-  ggplot(aes(x = date, y = mean_no)) +
-  geom_line() +
-  facet_wrap(~monitor)
+plot_co_com_time <- plot_daily_mean_pollutant(co_community_daily, "co", "Community Daily Mean CO by Monitor over Time")
 
-no_community_daily %>%
-  ggplot(aes(x = date, y = mean_no)) +
-  geom_line() +
-  facet_wrap(~monitor)
+plot_no_col_time <- plot_daily_mean_pollutant(no_colocation_daily, "no", "Colocation Daily Mean NO by Monitor over Time")
 
-no2_colocation_daily %>%
-  ggplot(aes(x = date, y = mean_no2)) +
-  geom_line() +
-  facet_wrap(~monitor)
+plot_no_com_time <- plot_daily_mean_pollutant(no_community_daily, "no", "Community Daily Mean NO by Monitor over Time")
 
-no2_community_daily %>%
-  ggplot(aes(x = date, y = mean_no2)) +
-  geom_line() +
-  facet_wrap(~monitor)
+plot_no2_col_time <- plot_daily_mean_pollutant(no2_colocation_daily, "no2", "Colocation Daily Mean NO2 by Monitor over Time")
 
-o3_colocation_daily %>%
-  ggplot(aes(x = date, y = mean_o3)) +
-  geom_line() +
-  facet_wrap(~monitor)
+plot_no2_com_time <- plot_daily_mean_pollutant(no2_community_daily, "no2", "Community Daily Mean NO2 by Monitor over Time")
 
-o3_community_daily %>%
-  ggplot(aes(x = date, y = mean_o3)) +
-  geom_line() +
-  facet_wrap(~monitor)
+plot_o3_col_time <- plot_daily_mean_pollutant(o3_colocation_daily, "o3", "Colocation Daily Mean O3 by Monitor over Time")
+
+plot_o3_com_time <- plot_daily_mean_pollutant(o3_community_daily, "o3", "Community Daily Mean O3 by Monitor over Time")
+
+
+grid.arrange(plot_co_col_time, plot_no_col_time, plot_no2_col_time, plot_o3_col_time)
+
+grid.arrange(plot_co_com_time, plot_no_com_time, plot_no2_com_time, plot_o3_com_time)
+
+
 ```
 
 Golden Monitor = MOD-00397
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-test <- co_colocation_hourly %>% filter(monitor == "MOD-00397") %>%
+golden_mod_co_colocation_hourly <- co_colocation_hourly %>% filter(monitor == "MOD-00397") %>%
   mutate(monitor_00397 = mean_co) %>%
   select(monitor_00397, date, hour)
 
-t <- co_colocation_hourly %>%
-  left_join(test) %>%
+co_colocation_hourly_full <- co_colocation_hourly %>%
+  left_join(golden_mod_co_colocation_hourly) %>%
   filter(date < as.Date("2023-08-20"))
 
-t %>%
+co_colocation_hourly_full %>%
   ggplot(aes(x = monitor_00397, y = mean_co)) +
   geom_point(alpha = 0.4) +
   facet_wrap(~monitor) +
-  theme_bw()
+  theme_bw() +
+  labs(x = "MOD-00397 Hourly CO",
+       y = "MOD Hourly CO",
+       title = "Comparing Hourly CO to Monitor 00379 Readings")
 ```
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
