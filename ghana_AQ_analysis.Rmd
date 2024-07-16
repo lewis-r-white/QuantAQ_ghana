@@ -69,6 +69,11 @@ source(here("src", "regress_pollutant_road.R"))
 # source function to apply regressions when comparing monitor to fleet average
 source(here("src", "compare_fleet_regression.R"))
 
+# source functions to merge in the SD card data for cases when server data is missing 
+source(here("src", "merge_sd_data.R"))
+source(here("src", "process_multiple_pollutants.R"))
+
+
 ```
 
 
@@ -178,22 +183,7 @@ pm25_community_daily <- results$pm25_community_daily
 
 
 
-library(data.table)
-library(dplyr)
-
-load_pollution_datasets <- function(pollutant) {
-  columns <- c("monitor", "timestamp", "date", "hour", pollutant)
-  
-  data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", 
-                select = columns, showProgress = TRUE)
-  
-  colocation_data <- data %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
-  
-  community_data <- data %>% filter(date >= as.Date("2023-09-26"))
-  
-  assign(paste0(pollutant, "_colocation"), colocation_data, envir = .GlobalEnv)
-  assign(paste0(pollutant, "_community"), community_data, envir = .GlobalEnv)
-}
+# LOAD IN THE GAS DATA ----
 
 # Define the pollutants of interest
 gasses <- c("co", "no", "no2", "o3")
@@ -225,9 +215,89 @@ for (gas in gasses) {
   }
 }
 
-# Check the results
-str(results)
 
+
+co_colocation_hourly <- results$co_colocation_hourly %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+co_colocation_daily <- results$co_colocation_daily %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+co_community_hourly <- results$co_community_hourly %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+co_community_daily <- results$co_community_daily %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+
+no_colocation_hourly <- results$no_colocation_hourly %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+no_colocation_daily <- results$no_colocation_daily %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+no_community_hourly <- results$no_community_hourly %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+no_community_daily <- results$no_community_daily %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+no2_colocation_hourly <- results$no2_colocation_hourly %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+no2_colocation_daily <- results$no2_colocation_daily %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+no2_community_hourly <- results$no2_community_hourly %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+no2_community_daily <- results$no2_community_daily %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+
+o3_colocation_hourly <- results$o3_colocation_hourly %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+o3_colocation_daily <- results$o3_colocation_daily %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+o3_community_hourly <- results$o3_community_hourly %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
+
+o3_community_daily <- results$o3_community_daily %>% 
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>% 
+  filter(mod_pm == FALSE) %>%
+  select(-mod_pm)
 ```
 
 
@@ -547,6 +617,87 @@ ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
 
 
 # Pollutant Trends
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+## LOAD IN THE DATA THAT CONTAINS SD CARD INFO ----
+
+# List all MOD files with full path
+mod_files <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-00.*\\.csv"
+)
+
+# List all MOD-PM files with full path
+mod_pm_files <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD-PM", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-PM.*\\.csv"
+)
+
+# Function to read, select columns, and add monitor name for MOD files
+read_and_select_mod <- function(file) {
+  # Extract the monitor name from the file name
+  monitor_name <- str_extract(basename(file), "MOD-\\d+")
+  
+  read_csv(file) %>%
+    select(timestamp_iso, co:pm25) %>%
+    mutate(monitor = monitor_name)
+}
+
+# Function to read, select columns, and add monitor name for MOD-PM files
+read_and_select_mod_pm <- function(file) {
+  # Extract the monitor name from the file name
+  monitor_name <- str_extract(basename(file), "MOD-PM-\\d+")
+  
+  read_csv(file) %>%
+    select(timestamp_iso, pm1:pm25) %>%
+    mutate(monitor = monitor_name)
+}
+
+# Read all MOD files and combine them
+MOD_sd_card <- mod_files %>%
+  map_dfr(read_and_select_mod)
+
+# Read all MOD-PM files and combine them
+MOD_PM_sd_card <- mod_pm_files %>%
+  map_dfr(read_and_select_mod_pm)
+
+MOD_PM_sd_card <- MOD_PM_sd_card %>%
+  mutate(co = NA_real_,
+         no = NA_real_,
+         no2 = NA_real_,
+         o3 = NA_real_) %>%
+  select(timestamp_iso, co, no, no2, o3, pm1, pm10, pm25, monitor)
+
+full_sd_card = rbind(MOD_sd_card, MOD_PM_sd_card)
+
+## MERGE THE SD DATA WITH THE SERVER DATA ---- 
+
+# List of pollutants you want to process
+pollutants <- c("pm1", "pm25", "pm10")
+
+# Process the pollutants
+results <- process_multiple_pollutants(pollutants, raw_data, full_sd_card)
+
+pm1_colocation_hourly <- results$pm1$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm1_colocation_daily <- results$pm1$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm10_colocation_hourly <- results$pm10$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm10_colocation_daily <- results$pm1$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm25_colocation_hourly <- results$pm25$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm25_colocation_daily <- results$pm25$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm1_community_hourly <- results$pm1$hourly %>% filter(date >= as.Date("2023-09-26"))
+pm1_community_daily <- results$pm1$daily %>% filter(date >= as.Date("2023-09-26"))
+pm10_community_hourly <- results$pm10$hourly %>% filter(date >= as.Date("2023-09-26"))
+pm10_community_daily <- results$pm10$daily %>% filter(date >= as.Date("2023-09-26"))
+pm25_community_hourly <- results$pm25$hourly %>% filter(date >= as.Date("2023-09-26"))
+pm25_community_daily <- results$pm25$daily %>% filter(date >= as.Date("2023-09-26"))
+
+```
+
+
 
 ## Grand Average plots 
 
@@ -1674,3 +1825,100 @@ pm10_regression_results <- regress_polutant_road(monitor_sf_road_dist, "pm10")
 pm10_regression_results$plot
 pm10_regression_results$summary_table
 ```
+
+
+
+
+
+# Gas Trends
+
+
+Questions:
+* What is an outlier worth removing?
+* The spatial stuff doesn't make sense to include here, right?
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+co_colocation_daily %>%
+  ggplot(aes(x = date, y = mean_co)) +
+  geom_line() +
+  facet_wrap(~monitor)
+
+co_community_daily %>%
+  ggplot(aes(x = date, y = mean_co)) +
+  geom_line() +
+  facet_wrap(~monitor)
+
+no_colocation_daily %>%
+  ggplot(aes(x = date, y = mean_no)) +
+  geom_line() +
+  facet_wrap(~monitor)
+
+no_community_daily %>%
+  ggplot(aes(x = date, y = mean_no)) +
+  geom_line() +
+  facet_wrap(~monitor)
+
+no2_colocation_daily %>%
+  ggplot(aes(x = date, y = mean_no2)) +
+  geom_line() +
+  facet_wrap(~monitor)
+
+no2_community_daily %>%
+  ggplot(aes(x = date, y = mean_no2)) +
+  geom_line() +
+  facet_wrap(~monitor)
+
+o3_colocation_daily %>%
+  ggplot(aes(x = date, y = mean_o3)) +
+  geom_line() +
+  facet_wrap(~monitor)
+
+o3_community_daily %>%
+  ggplot(aes(x = date, y = mean_o3)) +
+  geom_line() +
+  facet_wrap(~monitor)
+```
+
+Golden Monitor = MOD-00397
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+test <- co_colocation_hourly %>% filter(monitor == "MOD-00397") %>%
+  mutate(monitor_00397 = mean_co) %>%
+  select(monitor_00397, date, hour)
+
+t <- co_colocation_hourly %>%
+  left_join(test) %>%
+  filter(date < as.Date("2023-08-20"))
+
+t %>%
+  ggplot(aes(x = monitor_00397, y = mean_co)) +
+  geom_point(alpha = 0.4) +
+  facet_wrap(~monitor) +
+  theme_bw()
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm25_hourly_regression_data <- pm25_colocation_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm25))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm25_colocation_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm25))
+
+
+co_colocation_regression_results <- apply_regression(t, "mean_co", "monitor_00397")
+
+datatable(co_colocation_regression_results)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(co_colocation_hourly, "co")
+```
+
+
