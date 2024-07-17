@@ -11,6 +11,7 @@ load_pollution_datasets <- function(pollutant) {
   
   community_data <- data %>% filter(date >= as.Date("2023-09-26"))
   
+  assign(paste0(pollutant, "_raw"), data, envir = .GlobalEnv)
   assign(paste0(pollutant, "_colocation"), colocation_data, envir = .GlobalEnv)
   assign(paste0(pollutant, "_community"), community_data, envir = .GlobalEnv)
 }
