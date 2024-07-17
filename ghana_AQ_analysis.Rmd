@@ -73,6 +73,8 @@ source(here("src", "compare_fleet_regression.R"))
 source(here("src", "merge_sd_data.R"))
 source(here("src", "process_multiple_pollutants.R"))
 
+#source functions to create plot that compares individual monitor to golden monitor
+source(here("src", "compare_gas_to_reference_functions.R"))
 
 ```
 
@@ -1840,11 +1842,6 @@ pm10_regression_results$summary_table
 
 # Gas Trends
 
-
-Questions:
-* What is an outlier worth removing?
-* The spatial stuff doesn't make sense to include here, right?
-
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 plot_daily_mean_pollutant <- function(data, pollutant_measurement, title = NULL) {
   pollutant_col <- sym(paste0("mean_", pollutant_measurement))
@@ -1883,49 +1880,446 @@ grid.arrange(plot_co_com_time, plot_no_com_time, plot_no2_com_time, plot_o3_com_
 
 ```
 
-Golden Monitor = MOD-00397
+## Data Quality Check: Comparing Monitors to Golden Monitor
+
+### CO Monitor Performance During Colocation 
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-golden_mod_co_colocation_hourly <- co_colocation_hourly %>% filter(monitor == "MOD-00397") %>%
-  mutate(monitor_00397 = mean_co) %>%
-  select(monitor_00397, date, hour)
+# CO Colocation 
+co_col_hour_plot <- compare_pollutant_to_reference(co_colocation_hourly, "MOD-00397", "co", "hourly", "Comparing Hourly CO to Monitor 00397 Readings During Colocation")
 
-co_colocation_hourly_full <- co_colocation_hourly %>%
-  left_join(golden_mod_co_colocation_hourly) %>%
-  filter(date < as.Date("2023-08-20"))
+co_col_day_plot <- compare_pollutant_to_reference(co_colocation_daily, "MOD-00397", "co", "daily", "Comparing Daily CO to Monitor 00397 Readings During Colocation")
 
-co_colocation_hourly_full %>%
-  ggplot(aes(x = monitor_00397, y = mean_co)) +
-  geom_point(alpha = 0.4) +
-  facet_wrap(~monitor) +
-  theme_bw() +
-  labs(x = "MOD-00397 Hourly CO",
-       y = "MOD Hourly CO",
-       title = "Comparing Hourly CO to Monitor 00379 Readings")
+# CO community 
+co_com_hour_plot <- compare_pollutant_to_reference(co_community_hourly, "MOD-00397", "co", "hourly", "Comparing Daily CO to Monitor 00397 Readings During Community Deployment")
+
+co_com_day_plot <- compare_pollutant_to_reference(co_community_daily, "MOD-00397", "co", "daily", "Comparing Daily CO to Monitor 00397 Readings During Community Deployment")
+
+# CO Plots
+grid.arrange(co_col_hour_plot, co_col_day_plot)
 ```
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-pm25_hourly_regression_data <- pm25_colocation_hourly %>% 
-  group_by(date, hour) %>% 
-  summarize(offline_monitors = sum(is.na(mean_pm25))) %>%
-  ungroup() %>%
-  
-  #add the PM data back
-  left_join(pm25_colocation_hourly) %>%
-  
-  filter(offline_monitors < 35) %>%
-  
-  filter(!is.na(mean_pm25))
+# Combining everything for CO data with colocation, hourly
+pollutant <- "co"
+reference_monitor <- "MOD-00397"
 
 
-co_colocation_regression_results <- apply_regression(t, "mean_co", "monitor_00397")
+time_frame <- "hourly"
 
-datatable(co_colocation_regression_results)
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(co_colocation_hourly, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+co_colocation_hourly_full <- join_reference_data(co_colocation_hourly, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(co_colocation_hourly_full, "mean_co", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for CO Colocation Hourly Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+
+
+time_frame <- "daily"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(co_colocation_daily, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+co_colocation_daily_full <- join_reference_data(co_colocation_daily, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(co_colocation_daily_full, "mean_co", "monitor_MOD-00397")
+
+# Display the results
+# Display the results
+kable(regression_results, caption = "Regression Results for CO Colocation Daily Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+### CO Monitor Performance During Community Deployment  
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+grid.arrange(co_com_hour_plot, co_com_day_plot)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Combining everything for CO data with community, hourly
+pollutant <- "co"
+reference_monitor <- "MOD-00397"
+
+
+time_frame <- "hourly"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(co_community_hourly, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+co_community_hourly_full <- join_reference_data(co_community_hourly, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(co_community_hourly_full, "mean_co", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for CO Community Hourly Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+time_frame <- "daily"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(co_community_daily, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+co_community_daily_full <- join_reference_data(co_community_daily, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(co_community_daily_full, "mean_co", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for CO Community Daily Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
 ```
 
 
+### NO Monitor Performance During Colocation
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# NO Colocation 
+no_col_hour_plot <- compare_pollutant_to_reference(no_colocation_hourly, "MOD-00397", "no", "hourly", "Comparing Hourly NO to Monitor 00397 Readings During Colocation")
+
+no_col_day_plot <- compare_pollutant_to_reference(no_colocation_daily, "MOD-00397", "no", "daily", "Comparing Daily NO to Monitor 00397 Readings During Colocation")
+
+# NO community 
+no_com_hour_plot <- compare_pollutant_to_reference(no_community_hourly, "MOD-00397", "no", "hourly", "Comparing Daily NO to Monitor 00397 Readings During Community Deployment")
+
+no_com_day_plot <- compare_pollutant_to_reference(no_community_daily, "MOD-00397", "no", "daily", "Comparing Daily NO to Monitor 00397 Readings During Community Deployment")
+
+# NO Plots
+grid.arrange(no_col_hour_plot, no_col_day_plot)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Combining everything for NO data with colocation, hourly
+pollutant <- "no"
+reference_monitor <- "MOD-00397"
+
+
+time_frame <- "hourly"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(no_colocation_hourly, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+no_colocation_hourly_full <- join_reference_data(no_colocation_hourly, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(no_colocation_hourly_full, "mean_no", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for NO Colocation Hourly Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+
+
+time_frame <- "daily"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(no_colocation_daily, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+no_colocation_daily_full <- join_reference_data(no_colocation_daily, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(no_colocation_daily_full, "mean_no", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for NO Colocation Daily Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+### NO Monitor Performance During Community Deployment
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+grid.arrange(no_com_hour_plot, no_com_day_plot)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Combining everything for NO data with community, hourly
+pollutant <- "no"
+reference_monitor <- "MOD-00397"
+
+time_frame <- "hourly"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(no_community_hourly, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+no_community_hourly_full <- join_reference_data(no_community_hourly, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(no_community_hourly_full, "mean_no", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for NO Community Hourly Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+time_frame <- "daily"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(no_community_daily, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+no_community_daily_full <- join_reference_data(no_community_daily, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(no_community_daily_full, "mean_no", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for NO Community Daily Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+### $NO_2$ Monitor Performance During Colocation
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# NO2 Colocation
+no2_col_hour_plot <- compare_pollutant_to_reference(no2_colocation_hourly, "MOD-00397", "no2", "hourly", expression("Comparing Hourly NO"[2] * " to Monitor 00397 Readings During Colocation"))
+
+no2_col_day_plot <- compare_pollutant_to_reference(no2_colocation_daily, "MOD-00397", "no2", "daily", expression("Comparing Daily NO"[2] * " to Monitor 00397 Readings During Colocation"))
+
+# NO2 Community
+no2_com_hour_plot <- compare_pollutant_to_reference(no2_community_hourly, "MOD-00397", "no2", "hourly", expression("Comparing Hourly NO"[2] * " to Monitor 00397 Readings During Community Deployment"))
+
+no2_com_day_plot <- compare_pollutant_to_reference(no2_community_daily, "MOD-00397", "no2", "daily", expression("Comparing Daily NO"[2] * " to Monitor 00397 Readings During Community Deployment"))
+
+
+# NO2 Plots
+grid.arrange(no2_col_hour_plot, no2_col_day_plot)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Combining everything for NO2 data with colocation, hourly
+pollutant <- "no2"
+reference_monitor <- "MOD-00397"
+
+
+time_frame <- "hourly"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(no2_colocation_hourly, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+no2_colocation_hourly_full <- join_reference_data(no2_colocation_hourly, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(no2_colocation_hourly_full, "mean_no2", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for NO2 Colocation Hourly Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+
+
+time_frame <- "daily"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(no2_colocation_daily, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+no2_colocation_daily_full <- join_reference_data(no2_colocation_daily, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(no2_colocation_daily_full, "mean_no2", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for NO2 Colocation Daily Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+### $NO_2$ Monitor Performance During Community Deployment 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+grid.arrange(no2_com_hour_plot, no2_com_day_plot)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Combining everything for NO2 data with community, hourly
+pollutant <- "no2"
+reference_monitor <- "MOD-00397"
+
+time_frame <- "hourly"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(no2_community_hourly, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+no2_community_hourly_full <- join_reference_data(no2_community_hourly, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(no2_community_hourly_full, "mean_no2", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for NO2 Community Hourly Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+time_frame <- "daily"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(no2_community_daily, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+no2_community_daily_full <- join_reference_data(no2_community_daily, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(no2_community_daily_full, "mean_no2", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for NO2 Community Daily Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+### $O_3$ Monitor Performance During Colocation 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# O3 colocation
+o3_col_hour_plot <- compare_pollutant_to_reference(o3_colocation_hourly, "MOD-00397", "o3", "hourly", expression("Comparing Hourly O"[3] * " to Monitor 00397 Readings During Colocation"))
+
+o3_col_day_plot <- compare_pollutant_to_reference(o3_colocation_daily, "MOD-00397", "o3", "daily", expression("Comparing Daily O"[3] * " to Monitor 00397 Readings During Colocation"))
+
+# O3 community
+o3_com_hour_plot <- compare_pollutant_to_reference(o3_community_hourly, "MOD-00397", "o3", "hourly", expression("Comparing Hourly O"[3] * " to Monitor 00397 Readings During Community Deployment"))
+
+o3_com_day_plot <- compare_pollutant_to_reference(o3_community_daily, "MOD-00397", "o3", "daily", expression("Comparing Daily O"[3] * " to Monitor 00397 Readings During Community Deployment"))
+
+
+# O3 Plots
+grid.arrange(o3_col_hour_plot, o3_col_day_plot)
+```
+
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Combining everything for O3 data with colocation, hourly
+pollutant <- "o3"
+reference_monitor <- "MOD-00397"
+
+
+time_frame <- "hourly"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(o3_colocation_hourly, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+o3_colocation_hourly_full <- join_reference_data(o3_colocation_hourly, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(o3_colocation_hourly_full, "mean_o3", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for O3 Colocation Hourly Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+
+
+time_frame <- "daily"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(o3_colocation_daily, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+o3_colocation_daily_full <- join_reference_data(o3_colocation_daily, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(o3_colocation_daily_full, "mean_o3", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for O3 Colocation Daily Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+### $O_3$ Monitor Performance During Community Deployment
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+grid.arrange(o3_com_hour_plot, o3_com_day_plot)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Combining everything for O3 data with community, hourly
+pollutant <- "o3"
+reference_monitor <- "MOD-00397"
+
+time_frame <- "hourly"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(o3_community_hourly, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+o3_community_hourly_full <- join_reference_data(o3_community_hourly, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(o3_community_hourly_full, "mean_o3", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for O3 Community Hourly Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+time_frame <- "daily"
+
+# Step 1: Generate reference data
+reference_data <- generate_reference_data(o3_community_daily, reference_monitor, pollutant, time_frame)
+
+# Step 2: Join reference data with the full dataset
+o3_community_daily_full <- join_reference_data(o3_community_daily, reference_data, time_frame)
+
+# Step 3: Apply regression
+regression_results <- apply_regression_gas(o3_community_daily_full, "mean_o3", "monitor_MOD-00397")
+
+# Display the results
+kable(regression_results, caption = "Regression Results for O3 Community Daily Data") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+
+## Gas Trends: Heatmaps 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 generate_heatmap(co_colocation_hourly, "co")
+
+generate_heatmap(co_community_hourly, "co")
+
+generate_heatmap(no_colocation_hourly, "no")
+
+generate_heatmap(no_community_hourly, "no")
+
+generate_heatmap(no2_colocation_hourly, "no2")
+
+generate_heatmap(no2_community_hourly, "no2")
+
+generate_heatmap(o3_colocation_hourly, "o3")
+
+generate_heatmap(o3_community_hourly, "o3")
 ```
+
+
+
+
 
 
