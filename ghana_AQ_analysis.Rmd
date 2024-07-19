@@ -76,6 +76,8 @@ source(here("src", "process_multiple_pollutants.R"))
 #source functions to create plot that compares individual monitor to golden monitor
 source(here("src", "compare_gas_to_reference_functions.R"))
 
+#source functions to create plot that compares individual monitor to golden monitor
+source(here("src", "calc_gas_regressions.R"))
 ```
 
 
@@ -195,7 +197,6 @@ results <- list()
 
 # Load and summarize the data for each gas
 for (gas in gasses) {
-  cat("Loading data for:", gas, "\n")
   load_pollution_datasets(gas) 
   
   colocation_data_name <- paste0(gas, "_colocation")
@@ -344,7 +345,7 @@ ggplot() +
 ```
 
 
-# Summarizing Missingness
+# Summarizing Missingness of Server Data
 
 ## Colocation Missingness
 
@@ -618,9 +619,9 @@ ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
 ```
 
 
-# Pollutant Trends
+# Summarizing Missingness: Merging SD Card Data to Server Data
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
+```{r merging data, echo=FALSE, message=FALSE, warning=FALSE}
 ## LOAD IN THE DATA THAT CONTAINS SD CARD INFO ----
 
 # List all MOD files with full path
@@ -692,22 +693,192 @@ for (pollutant in pollutants) {
 # Process the pollutants
 results <- process_multiple_pollutants(pollutants, raw_data, full_sd_card)
 
-pm1_colocation_hourly <- results$pm1$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
-pm1_colocation_daily <- results$pm1$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
-pm10_colocation_hourly <- results$pm10$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
-pm10_colocation_daily <- results$pm10$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
-pm25_colocation_hourly <- results$pm25$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
-pm25_colocation_daily <- results$pm25$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
-pm1_community_hourly <- results$pm1$hourly %>% filter(date >= as.Date("2023-09-26"))
-pm1_community_daily <- results$pm1$daily %>% filter(date >= as.Date("2023-09-26"))
-pm10_community_hourly <- results$pm10$hourly %>% filter(date >= as.Date("2023-09-26"))
-pm10_community_daily <- results$pm10$daily %>% filter(date >= as.Date("2023-09-26"))
-pm25_community_hourly <- results$pm25$hourly %>% filter(date >= as.Date("2023-09-26"))
-pm25_community_daily <- results$pm25$daily %>% filter(date >= as.Date("2023-09-26"))
+## Summary results
+pm1_colocation_hourly <- results$pm1$summarized$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm1_colocation_daily <- results$pm1$summarized$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm10_colocation_hourly <- results$pm10$summarized$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm10_colocation_daily <- results$pm10$summarized$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm25_colocation_hourly <- results$pm25$summarized$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm25_colocation_daily <- results$pm25$summarized$daily %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
+pm1_community_hourly <- results$pm1$summarized$hourly %>% filter(date >= as.Date("2023-09-26"))
+pm1_community_daily <- results$pm1$summarized$daily %>% filter(date >= as.Date("2023-09-26"))
+pm10_community_hourly <- results$pm10$summarized$hourly %>% filter(date >= as.Date("2023-09-26"))
+pm10_community_daily <- results$pm10$summarized$daily %>% filter(date >= as.Date("2023-09-26"))
+pm25_community_hourly <- results$pm25$summarized$hourly %>% filter(date >= as.Date("2023-09-26"))
+pm25_community_daily <- results$pm25$summarized$daily %>% filter(date >= as.Date("2023-09-26"))
 
+
+## Full Raw Merged Data
+pm1_community_merged <- results$pm1$merged %>% filter(date >= as.Date("2023-09-26"))
+```
+
+## Community Missingness (No SD card data during Colocation)
+
+```{r sd card missingness, echo=FALSE, message=FALSE, warning=FALSE}
+# calculate total missingness across all of the monitors and the entire time range of interest 
+overall_missingness <- mean(is.na(pm1_community_merged$pm1)) * 100
+
+# daily missingness  
+daily_missingness <- pm1_community_merged %>% 
+  group_by(date) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  
+  filter(date > as.Date("2023-09-25") & date < as.Date("2024-06-11"))
+
+# hourly missingingness
+hourly_missingness <- pm1_community_merged %>% 
+  group_by(hour) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100)
+
+#monitor missingness
+monitor_missingness <- pm1_community_merged %>% 
+  group_by(monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  mutate(monitor = fct_reorder(monitor, -missing_rate))
+
+
+
+## DAILY MISSING DATA PERCENTAGE ----
+
+#aggregated across monitors 
+ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
+  geom_line() +
+  labs(title = "Daily Missing Data Rate Over Time During Community Deployment", x = "Date", y = "Missing Data Rate (%)") +
+  theme_minimal() +
+  geom_hline(yintercept = overall_missingness, color = "red")
+
+
+ggplot(daily_missingness, aes(x = date, y = missing_rate)) +
+  stat_smooth(span = 0.5) +
+  labs(title = "Daily Missing Data Rate Over Time During Community Deployment", x = "Date", y = "Missing Data Rate (%)") +
+  theme_minimal() +
+  geom_hline(yintercept = overall_missingness, color = "red")
+
+  
+
+
+## TOTAL MISSING DATA FOR EACH MONITOR ----
+
+ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Missing Data Rate by Monitor During Community Deployment", x = "Monitor", y = "Missing Data Rate (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+
+
+# MISSING DATA PERCENTAGE FOR EACH HOUR OF THE DAY
+
+#aggregated by monitor 
+ggplot(hourly_missingness, aes(x = hour, y = missing_rate)) +
+  geom_line() +
+  labs(title = "Hourly Missing Data Rate During Community Deployment", x = "Hour of the Day", y = "Missing Data Rate (%)") +
+  theme_minimal()
+
+#facet wrap for each monitor 
+pm1_community %>% 
+  group_by(hour, monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm1)) * 100) %>%
+  ggplot(aes(x = hour, y = missing_rate)) +
+  geom_line() +
+  facet_wrap(~monitor) +
+  theme_bw() +
+  labs(title = "Hourly Missing Data Rate for Each Monitor During Community Deployment", x = "Hour of the Day", y = "Missing Data Rate (%)") +
+  theme_minimal()
+
+
+# MAP OF MONITOR MISSINGNESS BY LOCATION ----
+missing_monitor_location <- left_join(monitor_missingness, monitor_points)
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "lightblue"), color = "black", alpha = 0.5) +
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = missing_monitor_location, aes(geometry = geometry, color = missing_rate), alpha = 0.7, size = 5) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Monitor Missing Data and Location",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d", name = "Missing Rate (%)")
 ```
 
 
+### Spatial Correlation of Missing Data 
+```{r sd card spatial missing data, echo=FALSE, message=FALSE, warning=FALSE}
+# Convert to an sf object
+missing_monitor_location <- st_as_sf(missing_monitor_location)
+
+coords <- st_coordinates(missing_monitor_location)
+nb <- knn2nb(knearneigh(coords, k = 5)) # k-nearest neighbors
+listw <- nb2listw(nb, style = "W")
+  
+# Calculate Moran's I
+moran_result <- moran.test(missing_monitor_location$missing_rate, listw)
+
+# Extract relevant values directly
+observed_value <- as.numeric(moran_result$estimate["Moran I statistic"])
+expected_value <- as.numeric(moran_result$estimate["Expectation"])
+variance <- as.numeric(moran_result$estimate["Variance"])
+z_score <- as.numeric(moran_result$statistic)
+p_value <- as.numeric(moran_result$p.value)
+
+# Create the Moran's I results table
+moran_table <- data.frame(
+  Test = "Moran's I Statistic",
+  `Observed Value` = observed_value,
+  `Expected Value` = expected_value,
+  `Variance` = variance,
+  `Z-score` = z_score,
+  `p-value` = p_value
+)
+
+moran_table
+```
+
+**Interpretation of Moran I Statistic**
+
+-   -1: The variable of interest is perfectly dispersed
+
+-   0: The variable of interest is randomly dispersed
+
+-   1: The variable of interest is perfectly clustered together
+
+```{r sd card missingness heat map, fig.height=16, fig.width=9, echo=FALSE, message=FALSE, warning=FALSE}
+## HEATMAP OF MISSINGNESS PER DAY FOR EACH MONITOR ----
+pm1_community_merged_with_week <- pm1_community_merged %>%
+  mutate(week = floor_date(date, "week")) # Extract the week
+
+
+daily_na <- pm1_community_merged_with_week %>%
+  group_by(monitor, date) %>%
+  summarize(na_percent = sum(is.na(pm1)) / n() * 100) %>%
+  ungroup() %>%
+  mutate(week = floor_date(date, "week"),  # Extract the week again for plotting
+         day_of_week = factor(weekdays(date), 
+                              levels = c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")))  # Reorder days of the week
+
+ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightgreen", high = "darkgreen", na.value = "white") +
+  labs(title = "Percentage of Missing PM1 Data by Day During Community Deployment",
+       x = "Week",
+       y = "Day of Week",
+       fill = "NA Percent") +
+  scale_y_discrete(limits = rev(levels(daily_na$day_of_week)),  # Reverse the order to have Sunday at the top
+                   breaks = c("Sunday", "Saturday")) +    # Label only specific days
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(~ monitor, scales = "free_x", ncol = 5)
+```
+
+
+
+# Pollutant Trends
 
 ## Grand Average plots 
 
@@ -1856,28 +2027,27 @@ plot_daily_mean_pollutant <- function(data, pollutant_measurement, title = NULL)
          title = title)
 }
 
-plot_co_col_time <- plot_daily_mean_pollutant(co_colocation_daily, "co", "Colocation Daily Mean CO by Monitor over Time")
+plot_co_col_time <- plot_daily_mean_pollutant(co_colocation_daily, "co", "Colocation Daily Mean CO by \nMonitor over Time")
 
-plot_co_com_time <- plot_daily_mean_pollutant(co_community_daily, "co", "Community Daily Mean CO by Monitor over Time")
+plot_co_com_time <- plot_daily_mean_pollutant(co_community_daily, "co", "Community Daily Mean CO by \nMonitor over Time")
 
-plot_no_col_time <- plot_daily_mean_pollutant(no_colocation_daily, "no", "Colocation Daily Mean NO by Monitor over Time")
+plot_no_col_time <- plot_daily_mean_pollutant(no_colocation_daily, "no", "Colocation Daily Mean NO by \nMonitor over Time")
 
-plot_no_com_time <- plot_daily_mean_pollutant(no_community_daily, "no", "Community Daily Mean NO by Monitor over Time")
+plot_no_com_time <- plot_daily_mean_pollutant(no_community_daily, "no", "Community Daily Mean NO by \nMonitor over Time")
 
-plot_no2_col_time <- plot_daily_mean_pollutant(no2_colocation_daily, "no2", "Colocation Daily Mean NO2 by Monitor over Time")
+plot_no2_col_time <- plot_daily_mean_pollutant(no2_colocation_daily, "no2", "Colocation Daily Mean NO2 by \nMonitor over Time")
 
-plot_no2_com_time <- plot_daily_mean_pollutant(no2_community_daily, "no2", "Community Daily Mean NO2 by Monitor over Time")
+plot_no2_com_time <- plot_daily_mean_pollutant(no2_community_daily, "no2", "Community Daily Mean NO2 by \nMonitor over Time")
 
-plot_o3_col_time <- plot_daily_mean_pollutant(o3_colocation_daily, "o3", "Colocation Daily Mean O3 by Monitor over Time")
+plot_o3_col_time <- plot_daily_mean_pollutant(o3_colocation_daily, "o3", "Colocation Daily Mean O3 by \nMonitor over Time")
 
-plot_o3_com_time <- plot_daily_mean_pollutant(o3_community_daily, "o3", "Community Daily Mean O3 by Monitor over Time")
+plot_o3_com_time <- plot_daily_mean_pollutant(o3_community_daily, "o3", "Community Daily Mean O3 by \nMonitor over Time")
+```
 
-
+```{r, fig.height=8, fig.width=8, echo=FALSE, message=FALSE, warning=FALSE}
 grid.arrange(plot_co_col_time, plot_no_col_time, plot_no2_col_time, plot_o3_col_time)
 
 grid.arrange(plot_co_com_time, plot_no_com_time, plot_no2_com_time, plot_o3_com_time)
-
-
 ```
 
 ## Data Quality Check: Comparing Monitors to Golden Monitor
@@ -1886,14 +2056,9 @@ grid.arrange(plot_co_com_time, plot_no_com_time, plot_no2_com_time, plot_o3_com_
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # CO Colocation 
-co_col_hour_plot <- compare_pollutant_to_reference(co_colocation_hourly, "MOD-00397", "co", "hourly", "Comparing Hourly CO to Monitor 00397 Readings During Colocation")
+co_col_hour_plot <- compare_pollutant_to_reference(co_colocation_hourly, "MOD-00397", "co", "hourly", "Comparing Hourly CO to Monitor 00397 Readings: Colocation")
 
-co_col_day_plot <- compare_pollutant_to_reference(co_colocation_daily, "MOD-00397", "co", "daily", "Comparing Daily CO to Monitor 00397 Readings During Colocation")
-
-# CO community 
-co_com_hour_plot <- compare_pollutant_to_reference(co_community_hourly, "MOD-00397", "co", "hourly", "Comparing Daily CO to Monitor 00397 Readings During Community Deployment")
-
-co_com_day_plot <- compare_pollutant_to_reference(co_community_daily, "MOD-00397", "co", "daily", "Comparing Daily CO to Monitor 00397 Readings During Community Deployment")
+co_col_day_plot <- compare_pollutant_to_reference(co_colocation_daily, "MOD-00397", "co", "daily", "Comparing Daily CO to Monitor 00397 Readings: Colocation")
 
 # CO Plots
 grid.arrange(co_col_hour_plot, co_col_day_plot)
@@ -1935,7 +2100,6 @@ co_colocation_daily_full <- join_reference_data(co_colocation_daily, reference_d
 regression_results <- apply_regression_gas(co_colocation_daily_full, "mean_co", "monitor_MOD-00397")
 
 # Display the results
-# Display the results
 kable(regression_results, caption = "Regression Results for CO Colocation Daily Data") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
 ```
@@ -1943,6 +2107,11 @@ kable(regression_results, caption = "Regression Results for CO Colocation Daily 
 ### CO Monitor Performance During Community Deployment  
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# CO community 
+co_com_hour_plot <- compare_pollutant_to_reference(co_community_hourly, "MOD-00397", "co", "hourly", "Comparing Daily CO to Monitor 00397 Readings: Community Deployment")
+
+co_com_day_plot <- compare_pollutant_to_reference(co_community_daily, "MOD-00397", "co", "daily", "Comparing Daily CO to Monitor 00397 Readings: Community Deployment")
+
 grid.arrange(co_com_hour_plot, co_com_day_plot)
 ```
 
@@ -1989,14 +2158,9 @@ kable(regression_results, caption = "Regression Results for CO Community Daily D
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # NO Colocation 
-no_col_hour_plot <- compare_pollutant_to_reference(no_colocation_hourly, "MOD-00397", "no", "hourly", "Comparing Hourly NO to Monitor 00397 Readings During Colocation")
+no_col_hour_plot <- compare_pollutant_to_reference(no_colocation_hourly, "MOD-00397", "no", "hourly", "Comparing Hourly NO to Monitor 00397 Readings: Colocation")
 
-no_col_day_plot <- compare_pollutant_to_reference(no_colocation_daily, "MOD-00397", "no", "daily", "Comparing Daily NO to Monitor 00397 Readings During Colocation")
-
-# NO community 
-no_com_hour_plot <- compare_pollutant_to_reference(no_community_hourly, "MOD-00397", "no", "hourly", "Comparing Daily NO to Monitor 00397 Readings During Community Deployment")
-
-no_com_day_plot <- compare_pollutant_to_reference(no_community_daily, "MOD-00397", "no", "daily", "Comparing Daily NO to Monitor 00397 Readings During Community Deployment")
+no_col_day_plot <- compare_pollutant_to_reference(no_colocation_daily, "MOD-00397", "no", "daily", "Comparing Daily NO to Monitor 00397 Readings: Colocation")
 
 # NO Plots
 grid.arrange(no_col_hour_plot, no_col_day_plot)
@@ -2047,6 +2211,11 @@ kable(regression_results, caption = "Regression Results for NO Colocation Daily 
 ### NO Monitor Performance During Community Deployment
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# NO community 
+no_com_hour_plot <- compare_pollutant_to_reference(no_community_hourly, "MOD-00397", "no", "hourly", "Comparing Daily NO to Monitor 00397 Readings: Community Deployment")
+
+no_com_day_plot <- compare_pollutant_to_reference(no_community_daily, "MOD-00397", "no", "daily", "Comparing Daily NO to Monitor 00397 Readings: Community Deployment")
+
 grid.arrange(no_com_hour_plot, no_com_day_plot)
 ```
 
@@ -2093,15 +2262,9 @@ kable(regression_results, caption = "Regression Results for NO Community Daily D
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # NO2 Colocation
-no2_col_hour_plot <- compare_pollutant_to_reference(no2_colocation_hourly, "MOD-00397", "no2", "hourly", expression("Comparing Hourly NO"[2] * " to Monitor 00397 Readings During Colocation"))
+no2_col_hour_plot <- compare_pollutant_to_reference(no2_colocation_hourly, "MOD-00397", "no2", "hourly", bquote("Comparing Hourly NO"[2]*" to Monitor 00397 Readings: Colocation"))
 
-no2_col_day_plot <- compare_pollutant_to_reference(no2_colocation_daily, "MOD-00397", "no2", "daily", expression("Comparing Daily NO"[2] * " to Monitor 00397 Readings During Colocation"))
-
-# NO2 Community
-no2_com_hour_plot <- compare_pollutant_to_reference(no2_community_hourly, "MOD-00397", "no2", "hourly", expression("Comparing Hourly NO"[2] * " to Monitor 00397 Readings During Community Deployment"))
-
-no2_com_day_plot <- compare_pollutant_to_reference(no2_community_daily, "MOD-00397", "no2", "daily", expression("Comparing Daily NO"[2] * " to Monitor 00397 Readings During Community Deployment"))
-
+no2_col_day_plot <- compare_pollutant_to_reference(no2_colocation_daily, "MOD-00397", "no2", "daily", bquote("Comparing Daily NO"[2]*" to Monitor 00397 Readings During: Colocation"))
 
 # NO2 Plots
 grid.arrange(no2_col_hour_plot, no2_col_day_plot)
@@ -2152,6 +2315,11 @@ kable(regression_results, caption = "Regression Results for NO2 Colocation Daily
 ### $NO_2$ Monitor Performance During Community Deployment 
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# NO2 Community
+no2_com_hour_plot <- compare_pollutant_to_reference(no2_community_hourly, "MOD-00397", "no2", "hourly", bquote("Comparing Hourly NO"[2]*" to Monitor 00397 Readings: Community Deployment"))
+
+no2_com_day_plot <- compare_pollutant_to_reference(no2_community_daily, "MOD-00397", "no2", "daily", bquote("Comparing Daily NO"[2]*" to Monitor 00397 Readings: Community Deployment"))
+
 grid.arrange(no2_com_hour_plot, no2_com_day_plot)
 ```
 
@@ -2198,14 +2366,9 @@ kable(regression_results, caption = "Regression Results for NO2 Community Daily 
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 # O3 colocation
-o3_col_hour_plot <- compare_pollutant_to_reference(o3_colocation_hourly, "MOD-00397", "o3", "hourly", expression("Comparing Hourly O"[3] * " to Monitor 00397 Readings During Colocation"))
+o3_col_hour_plot <- compare_pollutant_to_reference(o3_colocation_hourly, "MOD-00397", "o3", "hourly", expression("Comparing Hourly O"[3] * " to Monitor 00397 Readings: Colocation"))
 
-o3_col_day_plot <- compare_pollutant_to_reference(o3_colocation_daily, "MOD-00397", "o3", "daily", expression("Comparing Daily O"[3] * " to Monitor 00397 Readings During Colocation"))
-
-# O3 community
-o3_com_hour_plot <- compare_pollutant_to_reference(o3_community_hourly, "MOD-00397", "o3", "hourly", expression("Comparing Hourly O"[3] * " to Monitor 00397 Readings During Community Deployment"))
-
-o3_com_day_plot <- compare_pollutant_to_reference(o3_community_daily, "MOD-00397", "o3", "daily", expression("Comparing Daily O"[3] * " to Monitor 00397 Readings During Community Deployment"))
+o3_col_day_plot <- compare_pollutant_to_reference(o3_colocation_daily, "MOD-00397", "o3", "daily", expression("Comparing Daily O"[3] * " to Monitor 00397 Readings: Colocation"))
 
 
 # O3 Plots
@@ -2257,6 +2420,11 @@ kable(regression_results, caption = "Regression Results for O3 Colocation Daily 
 ### $O_3$ Monitor Performance During Community Deployment
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# O3 community
+o3_com_hour_plot <- compare_pollutant_to_reference(o3_community_hourly, "MOD-00397", "o3", "hourly", expression("Comparing Hourly O"[3] * " to Monitor 00397 Readings: Community Deployment"))
+
+o3_com_day_plot <- compare_pollutant_to_reference(o3_community_daily, "MOD-00397", "o3", "daily", expression("Comparing Daily O"[3] * " to Monitor 00397 Readings: Community Deployment"))
+
 grid.arrange(o3_com_hour_plot, o3_com_day_plot)
 ```
 

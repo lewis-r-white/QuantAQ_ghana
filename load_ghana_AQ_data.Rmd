@@ -129,3 +129,65 @@ write_csv(final_result_df, "ghana_AQ_parent_full.csv")
 
 
 
+
+
+
+
+## loading SD card data
+
+```{r}
+# List all MOD files with full path
+mod_files <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-00.*\\.csv"
+)
+
+# List all MOD-PM files with full path
+mod_pm_files <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD-PM", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-PM.*\\.csv"
+)
+
+# Function to read, select columns, and add monitor name for MOD files
+read_and_select_mod <- function(file) {
+  # Extract the monitor name from the file name
+  monitor_name <- str_extract(basename(file), "MOD-\\d+")
+  
+  read_csv(file) %>%
+    select(timestamp_iso, co:pm25) %>%
+    mutate(monitor = monitor_name)
+}
+
+# Function to read, select columns, and add monitor name for MOD-PM files
+read_and_select_mod_pm <- function(file) {
+  # Extract the monitor name from the file name
+  monitor_name <- str_extract(basename(file), "MOD-PM-\\d+")
+  
+  read_csv(file) %>%
+    select(timestamp_iso, pm1:pm25) %>%
+    mutate(monitor = monitor_name)
+}
+
+# Read all MOD files and combine them
+MOD_sd_card <- mod_files %>%
+  map_dfr(read_and_select_mod)
+
+# Read all MOD-PM files and combine them
+MOD_PM_sd_card <- mod_pm_files %>%
+  map_dfr(read_and_select_mod_pm)
+
+MOD_PM_sd_card <- MOD_PM_sd_card %>%
+  mutate(co = NA_real_,
+         no = NA_real_,
+         no2 = NA_real_,
+         o3 = NA_real_) %>%
+  select(timestamp_iso, co, no, no2, o3, pm1, pm10, pm25, monitor)
+
+full_sd_card = rbind(MOD_sd_card, MOD_PM_sd_card)
+```
+
+
