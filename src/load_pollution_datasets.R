@@ -1,11 +1,17 @@
-library(data.table)
-library(dplyr)
-
 load_pollution_datasets <- function(pollutant) {
   columns <- c("monitor", "timestamp", "date", "hour", pollutant)
   
   data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", 
                 select = columns, showProgress = TRUE)
+  
+  # Filter out rows with pm10 values above 1500 if the pollutant is pm10
+  if (pollutant == "pm10") {
+    data <- data %>% filter(!!sym(pollutant) <= 1500)
+  }
+  
+  # Add source column only where pollutant is not NA
+  data <- data %>% 
+    mutate(source = if_else(!is.na(!!sym(pollutant)), "cloud", NA_character_))
   
   colocation_data <- data %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
   

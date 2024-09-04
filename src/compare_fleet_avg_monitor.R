@@ -43,5 +43,10 @@ compare_fleet_avg_monitor <- function(data, pollutant, period = "hourly", ncol =
     theme_bw() +
     labs(x = paste(str_to_title(period), toupper(pollutant), "Fleet Average"),
          y = paste(str_to_title(period), "Monitor", toupper(pollutant), "Average"),
-         title = paste("Comparing", str_to_title(period), toupper(pollutant), "Average for Individual Monitor to", str_to_title(period), "\nFleet Average"))
+         title = paste("Comparing", str_to_title(period), toupper(pollutant), "Average for Individual Monitor to", str_to_title(period), "\nFleet Average")) +
+    theme(
+      axis.title = element_text(size = 14),   # Increase axis titles size
+      axis.text = element_text(size = 11),    # Increase axis labels size
+      strip.text = element_text(size = 11)  # Increase facet group text size
+    )
 }
