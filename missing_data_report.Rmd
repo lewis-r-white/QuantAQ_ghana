@@ -51,6 +51,8 @@ ghana_devices <- c("MOD-PM-01054", "MOD-PM-00900", "MOD-PM-00876", "MOD-PM-00882
                     "MOD-PM-00889", "MOD-PM-00899", "MOD-PM-00883", "MOD-PM-00895", "MOD-PM-01057",
                     "MOD-PM-01058", "MOD-PM-00893", "MOD-PM-00878", "MOD-PM-00888", "MOD-PM-00885",
                     "MOD-00398", "MOD-00401", "MOD-00399", "MOD-00397", "MOD-PM-00880")
+
+#ghana_devices <- c("MOD-00398", "MOD-00401", "MOD-00399", "MOD-00397","MOD-00400")
 ```
 
 #### For all tables, each cell represents the number of hours a device was inactive during a day. An hour was classified as inactive/missing if there were less than 30 observations during the hour.
@@ -363,9 +365,9 @@ Sys.setenv(TZ = 'Africa/Accra') #GMT for Ghana
 
 ```{r ghana, echo=FALSE, message=FALSE, warning=FALSE}
 # Define start_date and end_date
-start_date <- as.Date("2024-06-01") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
+start_date <- as.Date("2024-06-08") ## DUE TO TIMEZONES, START DATE NEEDS TO BE 1 DAY BEFORE THE ACTUAL START DATE OF INTEREST
 
-end_date <- as.Date("2024-06-10")
+end_date <- as.Date("2024-07-05")
 
 
 country = "Ghana"
