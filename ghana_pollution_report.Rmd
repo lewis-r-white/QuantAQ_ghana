@@ -3061,3 +3061,75 @@ close_roads %>%
 
 ```
 
+
+```{r, include = FALSE}
+# Load necessary libraries
+library(stringr)
+library(fs)
+
+# Define base paths
+base_source_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/sd_card_2024-09-01"  # Location of the downloaded date folders
+base_destination_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/sd_monitor_folders"  # Monitor folders you already created
+
+# Ensure monitor folders exist or create them
+for (monitor in monitor_names) {
+  monitor_folder <- file.path(base_destination_path, monitor)
+  if (!dir.exists(monitor_folder)) {
+    dir.create(monitor_folder, recursive = TRUE)
+    message(paste("Created monitor folder:", monitor_folder))
+  }
+}
+
+# Get a list of all date folders in the base source path
+date_folders <- list.dirs(base_source_path, full.names = TRUE, recursive = FALSE)
+
+# Loop through monitor names
+for (monitor in monitor_names) {
+  # Replace all '-' with '_' to match the folder structure (correcting folder format)
+  monitor_id <- str_replace_all(monitor, "-", "_")
+  
+  message(paste("Looking for monitor:", monitor_id))
+
+  # Find all matching folders across all date directories
+  matching_folders <- c()
+  
+  for (date_folder in date_folders) {
+    # Find all the source folders that contain the monitor ID in the current date folder
+    current_matching_folders <- list.dirs(date_folder, full.names = TRUE, recursive = TRUE)
+    current_matching_folders <- current_matching_folders[grepl(monitor_id, current_matching_folders)]
+    
+    # Append any matches found
+    if (length(current_matching_folders) > 0) {
+      matching_folders <- c(matching_folders, current_matching_folders)
+    }
+  }
+  
+  # Debug: print the matching folders to check if they're correct
+  if (length(matching_folders) > 0) {
+    message(paste("Monitor:", monitor_id, " - Found matching folders:", paste(matching_folders, collapse = ", ")))
+  } else {
+    warning(paste("No matching folders found for monitor:", monitor_id))
+  }
+  
+  # Move or copy each matching folder into its corresponding monitor directory
+  for (folder in matching_folders) {
+    destination_folder <- file.path(base_destination_path, monitor)
+    destination <- file.path(destination_folder, basename(folder))
+    
+    # Copy the folder but check if files already exist, and avoid overwriting
+    if (dir.exists(folder)) {
+      tryCatch({
+        dir_copy(folder, destination, overwrite = FALSE)  # Avoid overwriting existing files
+        message(paste("Copied", folder, "to", destination))
+      }, error = function(e) {
+        message(paste("Error copying", folder, "to", destination, ":", e$message))
+      })
+    } else {
+      warning(paste("Source folder", folder, "does not exist"))
+    }
+  }
+}
+
+
+```
+
