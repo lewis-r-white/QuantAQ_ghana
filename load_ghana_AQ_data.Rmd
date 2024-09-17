@@ -22,14 +22,19 @@ library(tidyverse)
 library(data.table)
 ```
 
+
+# load in the data if already exists 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-#load in the data if already exists 
+
 
 ghana_AQ_parent_full <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", showProgress = TRUE)
 ```
 
-```{r devices, echo=FALSE, message=FALSE, warning=FALSE}
+
+
 # load in the data if don't have access to the CSV (takes a long time!)
+
+```{r devices, echo=FALSE, message=FALSE, warning=FALSE}
 
 ### Connect to QuantAQ API (necessary to obtain data)
 setup_client() #log in to QuantAQ account and click developer in the left menu to grab API key
@@ -129,10 +134,6 @@ write_csv(final_result_df, "ghana_AQ_parent_full.csv")
 
 
 
-
-
-
-
 ## loading SD card data
 
 ```{r}
@@ -189,5 +190,7 @@ MOD_PM_sd_card <- MOD_PM_sd_card %>%
 
 full_sd_card = rbind(MOD_sd_card, MOD_PM_sd_card)
 ```
+
+
 
 
