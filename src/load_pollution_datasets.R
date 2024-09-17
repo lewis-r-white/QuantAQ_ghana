@@ -4,7 +4,7 @@ load_pollution_datasets <- function(pollutant) {
   data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", 
                 select = columns, showProgress = TRUE)
   
-  # Filter out rows with pm10 values above 1500 if the pollutant is pm10
+  # Filter out rows with pm10 values above 1500 if the pollutant is pm10. Suggested data error entry. 
   if (pollutant == "pm10") {
     data <- data %>% filter(!!sym(pollutant) <= 1500)
   }
