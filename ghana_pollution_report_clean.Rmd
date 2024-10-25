@@ -1,0 +1,1776 @@
+---
+title: "Ghana Air Quality Report"
+output: 
+  html_document:
+    toc: true
+    theme: united
+date: "2024-06-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+library(here) # file path org
+library(lubridate)# working with dates
+library(tictoc) # timing
+library(DT) # datatables
+library(purrr) # applying functions across df
+library(tidyverse) # data cleaning and plotting
+library(data.table) 
+library(sf) # spatial data 
+library(viridis) # color pallete 
+library(knitr)
+library(modelsummary) # table of regressions
+library(spdep)
+library(gstat)
+library(units) 
+library(gridExtra)
+library(broom)
+library(Metrics) 
+library(kableExtra) # table creation
+
+```
+
+
+```{r source functions, echo=FALSE, message=FALSE, warning=FALSE}
+# Source in functions
+
+# source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
+source(here("src", "load_pollution_datasets.R"))
+
+# source function that aggregates data by time scale of interest (hourly, daily)
+source(here("src", "summarize_pollution_times.R"))
+
+# Source function that creates fleet average vs monitor pollutant reading plot
+source(here("src", "compare_fleet_avg_monitor.R"))
+
+# Source function that creates heatmap of pollutant readings
+source(here("src", "generate_heatmap.R"))
+
+# Source function to make map of pollution values at each monitor location
+source(here("src", "generate_spatial_pollution_map.R"))
+
+# source function to calculate moran i 
+source(here("src", "calculate_moran_i.R"))
+
+# source function to prepare data for road regression analysis and plotting
+source(here("src", "prep_monitor_road_data.R"))
+
+# source function to plot map of pollutant levels by location with roads 
+source(here("src", "generate_spatial_pollution_road_map.R"))
+
+# source function to run regression analysis on pollutant / distance to road
+source(here("src", "regress_pollutant_road.R"))
+
+# source function to apply regressions when comparing monitor to fleet average
+source(here("src", "compare_fleet_regression.R"))
+
+# source functions to merge in the SD card data for cases when server data is missing 
+source(here("src", "merge_sd_data.R"))
+source(here("src", "process_multiple_pollutants.R"))
+
+#source functions to create plot that compares individual monitor to golden monitor
+source(here("src", "compare_gas_to_reference_functions.R"))
+
+#source functions to create plot that compares individual monitor to golden monitor
+source(here("src", "calc_gas_regressions.R"))
+```
+
+
+```{r location data, echo=FALSE, message=FALSE, warning=FALSE}
+#LOAD LOCATION DATA ----
+
+# identify the location columns
+location_columns <- c("monitor", "geo_lat", "geo_lon", "date")
+
+# read in the monitor location data using fread to handle large dataset
+location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", 
+                       select = location_columns, 
+                       showProgress = TRUE)
+
+# remove missing values and filter to recent monitor locations 
+location_complete <- location_data[complete.cases(location_data$geo_lat, location_data$geo_lon), ] %>%
+  filter(date > as.Date("2024-03-01"))
+
+# Get unique combinations for each device
+monitor_locations <- location_complete %>%
+  group_by(monitor) %>%
+  distinct(geo_lat, geo_lon) %>%
+  
+  # ADJUSTMENTS (ASK DJ TO CONFIRM) DUE TO ERRORS IN LONGITUDE
+  mutate(geo_lon = case_when(geo_lon == -173058.0000 ~ -1.73058,
+                             geo_lon == 1.5990 ~ -1.5990,
+                             TRUE ~ geo_lon)) %>%
+  filter(geo_lat != 8.05630)
+
+# create spatial feature dataset of monitor points
+monitor_points <- st_as_sf(monitor_locations, coords = c("geo_lon", "geo_lat"), crs = st_crs(4326)) %>%
+  mutate(mod_pm = str_detect(monitor, "MOD-PM")) %>%
+  mutate(monitor_type = case_when(mod_pm == TRUE ~ "MOD-PM",
+                                  mod_pm == FALSE ~ "MODULAIR"))
+
+
+
+# LOAD IN THE COUNTRY AND REGION MAP DATA ----
+
+country <- st_read(here("data", "gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm0_gss_20210308.shp"), quiet = TRUE)
+
+regions <- st_read(here("data", "gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20210308.shp"), quiet = TRUE) %>%
+  rename(region = ADM1_EN)
+
+bono_east <- regions %>% filter(region == "Bono East")
+
+## SPECIFIC TOWN MARKERS 
+
+# just the lat/lon for kintampo
+kintampo_sf <- st_as_sf(data.frame(
+  location = "Kintampo",
+  geo_lon = -1.7296,
+  geo_lat = 8.0593
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+# Amoma 
+amoma_sf <- st_as_sf(data.frame(
+  location = "amoma",
+  geo_lon = -1.878, 
+  geo_lat = 7.783
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+# Dwenewoho
+dwenewoho_sf <- st_as_sf(data.frame(
+  location = "dwenewoho",
+  geo_lon = -1.8325,
+  geo_lat = 7.7403
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+
+# New Longoro
+new_longoro_sf <- st_as_sf(data.frame(
+  location = "New Longoro",
+  geo_lon = -2.02953,
+  geo_lat = 8.14399
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+# Apesika
+apesika_sf <- st_as_sf(data.frame(
+  location = "Apesika",
+  geo_lon = -1.5453,
+  geo_lat = 7.99838
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+# Kurawura Akura
+kurawura_akura_sf <- st_as_sf(data.frame(
+  location = "Kurawura Akura",
+  geo_lon = -1.4684,
+  geo_lat = 8.7380
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+```
+
+
+```{r road weather population data, echo=FALSE, message=FALSE, warning=FALSE}
+# LOAD ROADS, WEATHER AND POPULATION DATA 
+
+
+# LOAD IN THE ROADS DATA ----
+
+# Load roads data and set CRS (assuming it's EPSG:4326)
+roads <- st_read(here("data", "hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
+st_crs(roads) <- 4326
+
+
+# Define the bounding box
+bounding_box <- st_bbox(c(xmin = -2.2, ymin = 7.6, xmax = -1.3, ymax = 8.8), crs = st_crs(4326))
+
+# Create a bounding box as an sf object
+bbox_sf <- st_as_sfc(bounding_box)
+
+# Filter the roads dataset to include only those within the bounding box
+#roads_filtered <- st_intersection(roads, bbox_sf)
+
+#Filter the roads to only bono east
+roads_filtered <- st_intersection(roads, bono_east)
+
+
+
+
+
+
+# LOAD WEATHER DATA ----
+
+met_data <- read_rds(here("data", "metall_2023_2024.rds"))
+
+
+
+# LOAD POPULATION DATA FROM KHRC
+
+prisma_populations <- readxl::read_xlsx(here("data", "individuals.xlsx")) 
+
+prisma_populations <- prisma_populations %>%
+  mutate(village = sub(" \\(.*$", "", village)) %>%
+  mutate(village = str_to_title(village)) %>%
+  group_by(village) %>%
+  summarise(households = sum(households),
+            population = sum(population)) %>%
+  mutate(
+    village = str_to_title(sub(" \\(.*$", "", village)),
+    village = case_when(
+      village == "Asantekwa" ~ "Asantekwaa",
+      village == "Korawura Akura" ~ "Kurawura Akura",
+      village == "Soronuase" ~ "Sorunuase",
+      TRUE ~ village
+    )
+  )
+
+
+
+monitor_names <- tibble::tribble(
+  ~monitor, ~description, ~location,
+  "MOD-PM-00887", "Babator", "Babatokuma GH",
+  "MOD-PM-00881", "Mo-line", "Kintampo GH",
+  "MOD-PM-01052", "Kokuma", "Kokuma GH",
+  "MOD-PM-01055", "Krabonso", "Krabonso GH",
+  "MOD-PM-00893", "Jato Akura", "Jato Akura GH",
+  "MOD-PM-01060", "Kintampo Central College Areas", "Kintampo GH",
+  "MOD-PM-00899", "Nante", "Nante GH",
+  "MOD-00399", "Dwenewoho", "Dwenewoho GH",
+  "MOD-PM-01057", "Sorunuase", "Sorunuase GH",
+  "MOD-PM-00877", "Pamdu", "Pamdu GH",
+  "MOD-PM-00898", "Anokyekrom", "Anokyekrom GH",
+  "MOD-PM-00900", "Kawampe", "Kawampe GH",
+  "MOD-PM-00883", "Portor", "Portor GH",
+  "MOD-00398", "Kurawura Akura", "Kurawura Akura GH",
+  "MOD-PM-00884", "KHRC Residency", "Kintampo GH",
+  "MOD-PM-01056", "Gulumpe", "Gulumpe GH",
+  "MOD-PM-00879", "Dawadawa", "Dawadawa GH",
+  "MOD-PM-00897", "Pramposo", "Pramposo GH",
+  "MOD-PM-01053", "Anyima", "Anyima GH",
+  "MOD-PM-00880", "Kadelso", "Kadelso GH",
+  "MOD-PM-01051", "Weila", "Weila GH",
+  "MOD-PM-01058", "Krutakyi", "Krutakyi GH",
+  "MOD-PM-00895", "Ntankro", "Kintampo GH",
+  "MOD-PM-00889", "Beposo", "Beposo GH",
+  "MOD-PM-00882", "Apaaso", "Kintampo GH",
+  "MOD-PM-01059", "Paninamisa", "Paninamisa GH",
+  "MOD-00397", "Apesika", "Apesika GH",
+  "MOD-PM-00878", "Jema Pentecost", "Jema GH",
+  "MOD-00401", "New Longoro", "New Longoro GH",
+  "MOD-PM-00891", "Habitat", "Kintampo GH",
+  "MOD-PM-00885", "Kwabia", "Kwabia GH",
+  "MOD-PM-00890", "Akora", "Akora GH",
+  "MOD-PM-00876", "Amoma", "Amoma GH",
+  "MOD-PM-00888", "Nante Zongo", "Nante Zongo GH",
+  "MOD-PM-00894", "Alhassan Akura", "Alhassan Akura GH",
+  "MOD-00400", "Kintampo-PTC Area (Magazine)", "Kintampo GH",
+  "MOD-PM-01054", "Ampoma", "Ampoma GH",
+  "MOD-PM-00896", "Asantekwaa", "Asantekwaa GH",
+  "MOD-PM-00886", "Jema Zongo", "Jema GH",
+  "MOD-PM-00892", "Atta Akura", "Atta Akura GH"
+)
+
+monitor_names <- monitor_names %>%
+  mutate(location = gsub(" GH", "", location)) %>%
+  mutate(locations = if_else(grepl("Kintampo", location),
+                            paste(description, location, sep = ", "),
+                            location))
+
+
+monitor_community_populations <- full_join(monitor_names, prisma_populations, by = c("location" = "village"))
+
+```
+
+
+
+## Monitor Locations
+
+```{r plot monitor locations, echo=FALSE, message=FALSE, warning=FALSE}
+# Define the bounding box coordinates
+bbox_coords <- matrix(c(-2.2, 7.6, -2.2, 8.8, -1.3, 8.8, -1.3, 7.6, -2.2, 7.6), ncol = 2, byrow = TRUE)
+bbox_polygon <- st_polygon(list(bbox_coords))
+bbox_sf <- st_sfc(bbox_polygon, crs = st_crs(4326))
+
+# Plot the map with the bounding box
+ggplot() +
+  # Add Ghana regions
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5) +
+  # Add monitor points with transparency
+  geom_sf(data = monitor_points, aes(geometry = geometry), color = "red", alpha = 0.5, size = 2) +
+  # Add bounding box
+  geom_sf(data = bbox_sf, fill = NA, color = "blue", lwd = 0.5, linetype = "solid") +
+  # Add Ghana country boundary
+  geom_sf(data = country, fill = NA, color = "black", size = 1) +
+  #labs(title = "Monitor Locations in Ghana") +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 1), # Increase tick mark size
+    plot.title = element_text(size = 16) 
+  )
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5) +
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = monitor_points, aes(geometry = geometry, color = monitor_type), alpha = 0.5, size = 5) +
+  
+  # Add Kintampo marker
+  geom_sf(data = kintampo_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add Dwenewoho marker
+  geom_sf(data = dwenewoho_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add new longoro marker
+  geom_sf(data = new_longoro_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add apesika marker
+  geom_sf(data = apesika_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add kurawura akura marker
+  geom_sf(data = kurawura_akura_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  
+  # Add Kintamp annotation text
+  annotate("text", x = -1.73, y = 8.10, label = "Kintampo", color = "black", size = 5) +
+  # Add Dwenewoho annotation text
+  annotate("text", x = -1.69, y = 7.74, label = "Dwenewoho", color = "black", size = 5) +
+  # Add new longoro annotation text
+  annotate("text", x = -2.047, y = 8.214, label = "New Longoro", color = "black", size = 5) +
+  # Add apesika annotation text
+  annotate("text", x = -1.459, y = 7.96, label = "Apesika", color = "black", size = 5) +
+  # Add atta akura annotation text
+  annotate("text", x = -1.65, y = 8.75, label = "Kurawura Akura", color = "black", size = 5) +
+  
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  labs(x = "", 
+       y = "",
+       color = "Monitor Type") +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.5), # Increase tick mark size
+    plot.title = element_text(size = 16), # Increase title size
+    legend.text = element_text(size = 10), # Increase legend text size
+    legend.title = element_text(size = 12) # Increase legend title size
+  )
+```
+
+
+## Load corrected pollution data and create summaries 
+
+```{r}
+# LOAD POLLUTION DATA
+pm1_corrected <- readRDS(here("data", "cloud_sd_merged", "pm1corrected_20241024.rds"))
+
+pm25_corrected <- readRDS(here("data", "cloud_sd_merged", "pm25corrected_20241024.rds"))
+
+pm10_corrected <- readRDS(here("data", "cloud_sd_merged", "pm10corrected_20241024.rds"))
+
+## SUMMARIZE BASED ON THE CORRECTED DATA 
+
+summarized_pm1 <- summarize_pollution_times(pm1_corrected, "pm1")
+summarized_pm25 <- summarize_pollution_times(pm25_corrected, "pm25")
+summarized_pm10 <- summarize_pollution_times(pm10_corrected, "pm10")
+
+pm1_community_hourly <- summarized_pm1$hourly
+pm1_community_daily <- summarized_pm1$daily
+
+pm25_community_hourly <- summarized_pm25$hourly
+pm25_community_daily <- summarized_pm25$daily
+
+pm10_community_hourly <- summarized_pm10$hourly
+pm10_community_daily <- summarized_pm10$daily
+```
+
+
+## Data source (Cloud vs SD for each monitor)
+
+```{r plot cloud vs sd data, echo=FALSE, message=FALSE, warning=FALSE}
+monitor_obs_count_type <- pm25_corrected %>%
+  group_by(monitor, source) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  group_by(monitor) %>%
+  mutate(percentage = count / sum(count) * 100) %>%
+  ungroup() %>%
+  filter(!is.na(source)) %>%
+  mutate(source = factor(source, levels = c("sd_card", "cloud")))
+
+monitor_order <- monitor_obs_count_type %>%
+  filter(source %in% c("cloud", "sd_card")) %>%
+  group_by(monitor) %>%
+  summarise(total = sum(percentage)) %>%
+  arrange(desc(total)) %>%
+  pull(monitor)
+
+monitor_obs_count_type <- monutor_obs_count_type %>%
+  mutate(monitor = factor(monitor, levels = monitor_order))
+
+ggplot(monitor_obs_count_type, aes(x = monitor, y = percentage, fill = source)) +
+  geom_bar(stat = "identity") +
+  labs(title = "",
+       x = "Monitor",
+       y = "Percentage of Data Recorded",
+       fill = "Data Source") +  # Custom legend title
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.title.x = element_text(size = 14),  # Increase x-axis title size
+        axis.title.y = element_text(size = 14),  # Increase y-axis title size
+        legend.text = element_text(size = 12),   # Increase legend text size
+        legend.title = element_text(size = 14)) +  # Increase legend title size
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, 100)) +
+  scale_fill_manual(values = c("cloud" = "#2599db", "sd_card" = "#b54033"),
+                    labels = c("cloud" = "Cloud", "sd_card" = "SD Card"))
+
+
+```
+
+
+
+# Pollutant Trends
+
+## Grand Average plots 
+
+```{r grand average facet, echo=FALSE, message=FALSE, warning=FALSE}
+# join daily PM into one dataset
+daily_pollutants <- left_join(pm1_community_daily, pm25_community_daily) %>% 
+  left_join(pm10_community_daily)
+
+daily_pollutants$date <- as.Date(daily_pollutants$date)
+
+
+# pivot longer data so each measurement is its own row 
+daily_pollutants_long <- daily_pollutants %>%
+  group_by(date) %>%
+  summarise('Mean PM 1' = mean(mean_pm1, na.rm = TRUE),
+            'Mean PM 2.5' = mean(mean_pm25, na.rm = TRUE),
+            'Mean PM 10' = mean(mean_pm10, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_longer(cols = c("Mean PM 1", "Mean PM 2.5", "Mean PM 10"), names_to = "pollutant", values_to = "measurement")
+
+# Calculate the mean values for each pollutant
+mean_values <- daily_pollutants_long %>%
+  group_by(pollutant) %>%
+  summarise(mean_measurement = signif(mean(measurement, na.rm = TRUE), 3))
+
+# Merge the mean values back into the original data frame for plotting
+daily_pollutants_long <- daily_pollutants_long %>%
+  left_join(mean_values, by = "pollutant")
+
+
+# Convert the 'pollutant' column to a factor with the desired order
+daily_pollutants_long$pollutant <- factor(daily_pollutants_long$pollutant, levels = c("Mean PM 1", "Mean PM 2.5", "Mean PM 10"))
+
+
+daily_pollutants_long %>%
+  ggplot(aes(x = date, y = measurement)) +
+  geom_line() +
+  geom_hline(aes(yintercept = mean_measurement), color = "#cc1414", linetype = "dashed") +
+  geom_text(data = mean_values, aes(x = max(daily_pollutants_long$date), y = mean_measurement, label = paste0(pollutant, ": ", round(mean_measurement, 2), " µg/m³")),
+            color = "#cc1414", hjust = 1, vjust = -0.9, size = 4.5) +
+  theme_bw() +
+  labs(x = "Date",
+       y = "Pollutant Measurement (µg/m³)") +
+  facet_grid(factor(pollutant, levels = c("Mean PM 1", "Mean PM 2.5", "Mean PM 10" )) ~ ., scales = "free_y") +
+  theme(
+    axis.title = element_text(size = 14),   # Increase axis titles size
+    axis.text = element_text(size = 12),    # Increase axis labels size
+    strip.text = element_text(size = 12)  # Increase facet group text size
+  )
+
+```
+
+
+```{r pm25 aqi plot, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Define AQI levels with ordered factors
+aqi_levels <- data.frame(
+  ymin = c(0, 9.1, 35.5, 55.5, 125.5, 225.5),
+  ymax = c(9, 35.4, 55.4, 125.4, 225.4, 450),
+  fill = factor(c("Good", "Moderate", "Unhealthy for Sensitive Groups", 
+                  "Unhealthy", "Very Unhealthy", "Hazardous"), 
+                levels = c("Good", "Moderate", "Unhealthy for Sensitive Groups", 
+                           "Unhealthy", "Very Unhealthy", "Hazardous")),
+  color = c("green", "yellow", "orange", "red", "purple", "maroon")
+)
+
+# Plot with legend inside the graph
+daily_pollutants_long %>%
+  filter(pollutant == "Mean PM 2.5") %>% 
+  ggplot(aes(x = date, y = measurement)) +
+  # Add background rectangles for AQI levels
+  geom_rect(data = aqi_levels, 
+            aes(xmin = min(daily_pollutants_long$date), 
+                xmax = max(daily_pollutants_long$date), 
+                ymin = ymin, 
+                ymax = ymax, 
+                fill = fill), 
+            color = NA, alpha = 0.2, inherit.aes = FALSE) +
+  # Add the PM 2.5 line
+  geom_line(color = "black") +
+  theme_bw() +
+  labs(x = "Date",
+       y = bquote("Fleet Mean " ~ PM[2.5] ~ (µg/m^3)),
+       fill = "US-EPA AQI Risk Categories") +  # Add legend title for the AQI levels
+  theme(
+    axis.title = element_text(size = 14),   # Increase axis titles size
+    axis.text = element_text(size = 12),    # Increase axis labels size
+    strip.text = element_text(size = 12),    # Increase facet group text size
+    legend.position = c(0.77, 0.73),  # Position legend inside the graph (top right)
+    legend.background = element_rect(fill = rgb(1, 1, 1, alpha = 0.7), color = "black"),
+    legend.title = element_text(size = 12),  # Adjust legend title size
+    legend.text = element_text(size = 10)    # Adjust legend text size
+  ) +
+  scale_fill_manual(values = aqi_levels$color) +
+  guides(fill = guide_legend(reverse = TRUE))  # Reverse the order of the legend
+
+
+```
+
+
+```{r pm25 aqi vertical stripes plot, echo=FALSE, message=FALSE, warning=FALSE}
+
+# First, categorize the measurement values into AQI levels
+daily_pollutants_long <- daily_pollutants_long %>%
+  mutate(AQI_Category = cut(measurement, 
+                            breaks = c(-Inf, 9, 35.4, 55.4, 125.4, 225.4, Inf), 
+                            labels = c("Good", "Moderate", "Unhealthy for Sensitive Groups", 
+                                       "Unhealthy", "Very Unhealthy", "Hazardous"),
+                            right = FALSE))
+
+# Plot with vertical bands and legend on the side
+ggplot(daily_pollutants_long %>% filter(pollutant == "Mean PM 2.5"), 
+       aes(x = date, y = measurement)) +
+  # Add background tiles for AQI levels
+  geom_tile(aes(fill = AQI_Category), height = Inf, alpha = 0.3) +
+  # Add the PM 2.5 line
+  geom_line(color = "black") +
+  theme_bw() +
+  labs(x = "Date",
+       y = bquote("Fleet Mean " ~ PM[2.5] ~ (µg/m^3)),
+       fill = "US-EPA AQI Risk Categories") +  # Add legend title for the AQI levels
+  theme(
+    axis.title = element_text(size = 14),   # Increase axis titles size
+    axis.text = element_text(size = 12),    # Increase axis labels size
+    strip.text = element_text(size = 12),    # Increase facet group text size
+    legend.position = "right",  # Position legend on the right side
+    legend.title = element_text(size = 12),  # Adjust legend title size
+    legend.text = element_text(size = 10)    # Adjust legend text size
+  ) +
+  scale_fill_manual(values = aqi_levels$color) +
+  guides(fill = guide_legend(reverse = TRUE))  # Reverse the order of the legend
+
+```
+
+
+## PM 2.5 Community Deployment
+
+### Checking Individual Monitor to Fleet Average
+
+```{r monitor vs fleet avg 25, fig.height=10, fig.width=7, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(pm25_community_hourly, "pm25", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(pm25_community_daily, "pm25", "daily")
+```
+
+#### PM 2.5 Hourly: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r monitor vs fleet avg 25 hourly table, echo=FALSE, message=FALSE, warning=FALSE}
+pm25_hourly_regression_data <- pm25_community_hourly %>% 
+  group_by(date, hour) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm25))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm25_community_hourly) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm25))
+
+
+pm25_colocation_regression_results <- apply_regression(pm25_hourly_regression_data, "mean_pm25", "fleet_average_pm25")
+
+datatable(pm25_colocation_regression_results)
+```
+
+#### PM 2.5 Daily: Individual Monitor Regressed on Fleet Average
+**Note: fleet average required at minimum 5 readings to be included in regression)**
+```{r monitor vs fleet avg 25 daily table, echo=FALSE, message=FALSE, warning=FALSE}
+pm25_daily_regression_data <- pm25_community_daily %>% 
+  group_by(date) %>% 
+  summarize(offline_monitors = sum(is.na(mean_pm25))) %>%
+  ungroup() %>%
+  
+  #add the PM data back
+  left_join(pm25_community_daily) %>%
+  
+  filter(offline_monitors < 35) %>%
+  
+  filter(!is.na(mean_pm25))
+
+
+pm25_colocation_regression_results <- apply_regression(pm25_daily_regression_data, "mean_pm25", "fleet_average_pm25")
+
+datatable(pm25_colocation_regression_results)
+```
+
+
+### PM 2.5 Trends
+
+```{r pm25 timelines, echo=FALSE, message=FALSE, warning=FALSE}
+daily_pm25_all_devices <- pm25_corrected %>%
+  group_by(date, monitor) %>%
+  summarize(mean_pm25 = mean(pm25, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm25, group = monitor)) +
+  geom_line(color = "black", alpha = 0.2) +
+  theme_minimal() +
+  labs(y = "Mean PM 2.5",
+       title = "Average PM 2.5 Accross All Devices")
+
+daily_cooktime_pm25_all_devices <- pm25_corrected %>%
+  filter(hour >= 16 & hour < 20) %>%
+  group_by(monitor, date) %>%
+  summarise(mean_pm25 = mean(pm25, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm25, group = monitor)) +
+  geom_line(color = "black", alpha = 0.4) +
+  theme_minimal() +
+  labs(y = "Mean PM 2.5",
+       title = "Daily Average PM 2.5 for Each Monitor During Primary Cooking Hours (4-8)") 
+
+grid.arrange(daily_pm25_all_devices, daily_cooktime_pm25_all_devices)
+
+daily_pm25_timeline <- pm25_corrected %>%
+  group_by(date) %>%
+  summarize(mean_pm25 = mean(pm25, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm25)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 2.5",
+       title = "Average PM 2.5 Accross All Devices")
+
+daily_cooktime_pm25_timeline <- pm25_corrected %>%
+  filter(hour >= 16 & hour < 20) %>%
+  group_by(date) %>%
+  summarize(mean_pm25 = mean(pm25, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm25)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM 2.5",
+       title = "Mean PM 2.5 Accross All Devices During Cooking Hours (4-8)")
+
+grid.arrange(daily_pm25_timeline, daily_cooktime_pm25_timeline)
+```
+
+### PM 2.5 Heatmap
+
+```{r pm25 trends, echo=FALSE, message=FALSE, warning=FALSE}
+generate_heatmap(pm25_community_hourly, "pm25")
+```
+
+
+
+### Harmattan vs non-Harmattan + Cooktime vs non-Cooktime
+
+```{r pm25 trends harmattan and cooktime calc, echo=FALSE, message=FALSE, warning=FALSE}
+harmattan_start <- as.Date("2023-12-01")
+harmattan_end <- as.Date("2024-03-01")
+
+pm25_community_hourly_seasonality <- pm25_community_hourly %>% 
+  mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan")) %>%
+  mutate(
+    cooking_period = factor(case_when(
+      hour >= 15 & hour <= 18 ~ "Active Cooking Hours",
+      (hour < 15 | hour > 18) & hour != 3 ~ "Non-Active Cooking Hours",
+      hour == 3 ~ "Control Hour"
+    ), levels = c("Active Cooking Hours", "Non-Active Cooking Hours", "Control Hour"))
+  )
+
+
+# hourly pm 2.5 data from just harmattan only
+harmattan_pm25_hourly <- pm25_community_hourly_seasonality %>% filter(date >= harmattan_start & date <= harmattan_end) %>% 
+  filter(!is.na(hour)) 
+
+# hourly pm 2.5 data from not harmattan only
+not_harmattan_pm25_hourly <- pm25_community_hourly_seasonality %>% filter(date < harmattan_start | date > harmattan_end) %>%
+  filter(!is.na(hour)) 
+
+
+# mean and sd pm25 during harmattan
+mean(harmattan_pm25_hourly$mean_pm25, na.rm = TRUE)
+sd(harmattan_pm25_hourly$mean_pm25, na.rm = TRUE)
+
+# mean and sd pm25 NOT during harmattan
+mean(not_harmattan_pm25_hourly$mean_pm25, na.rm = TRUE)
+sd(not_harmattan_pm25_hourly$mean_pm25, na.rm = TRUE)
+
+
+
+
+# COMPARING COOKTIME PM 2.5 ACROSS ALL SEASONS
+anova_result <- aov(mean_pm25 ~ cooking_period, data = pm25_community_hourly_seasonality)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+# COMPARING COOKTIME PM 2.5 DURING HARMATTAN
+
+anova_result <- aov(mean_pm25 ~ cooking_period, data = harmattan_pm25_hourly)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+# COMPARING COOKTIME PM 2.5 NOT HARMATTAN
+
+anova_result <- aov(mean_pm25 ~ cooking_period, data = not_harmattan_pm25_hourly)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+
+# COOKTIME VS NOT COOKTIME COMP (MEANS AND SDs)
+
+cooktime_pm25_hourly <- pm25_community_hourly_seasonality %>% filter(cooking_period == "Active Cooking Hours") %>% 
+  filter(!is.na(hour)) 
+
+not_cooktime_pm25_hourly <- pm25_community_hourly_seasonality %>% filter(cooking_period == "Non-Active Cooking Hours") %>% 
+  filter(!is.na(hour)) 
+
+control_pm25_hourly <- pm25_community_hourly_seasonality %>% filter(cooking_period == "Control Hour") %>% 
+  filter(!is.na(hour)) 
+
+mean(cooktime_pm25_hourly$mean_pm25, na.rm = TRUE) 
+sd(cooktime_pm25_hourly$mean_pm25, na.rm = TRUE) 
+
+mean(not_cooktime_pm25_hourly$mean_pm25, na.rm = TRUE)  
+sd(not_cooktime_pm25_hourly$mean_pm25, na.rm = TRUE) 
+
+mean(control_pm25_hourly$mean_pm25, na.rm = TRUE)  
+sd(control_pm25_hourly$mean_pm25, na.rm = TRUE)
+
+
+# COOKTIME VS NOT COOKTIME VS CONTROL DURING HARMATTAN (MEANS AND SDs)
+
+mean(harmattan_pm25_hourly$mean_pm25[harmattan_pm25_hourly$cooking_period == "Active Cooking Hours"], na.rm = TRUE)
+sd(harmattan_pm25_hourly$mean_pm25[harmattan_pm25_hourly$cooking_period == "Active Cooking Hours"], na.rm = TRUE)
+
+mean(harmattan_pm25_hourly$mean_pm25[harmattan_pm25_hourly$cooking_period == "Non-Active Cooking Hours"], na.rm = TRUE)
+sd(harmattan_pm25_hourly$mean_pm25[harmattan_pm25_hourly$cooking_period == "Non-Active Cooking Hours"], na.rm = TRUE)
+
+mean(harmattan_pm25_hourly$mean_pm25[harmattan_pm25_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+sd(harmattan_pm25_hourly$mean_pm25[harmattan_pm25_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+
+# COOKTIME VS NOT COOKTIME NOT DURING HARMATTAN (MEANS AND SDs)
+
+mean(not_harmattan_pm25_hourly$mean_pm25[not_harmattan_pm25_hourly$cooking_period == "Active Cooking Hours"], na.rm = TRUE)
+sd(not_harmattan_pm25_hourly$mean_pm25[not_harmattan_pm25_hourly$cooking_period == "Active Cooking Hours"], na.rm = TRUE)
+
+mean(not_harmattan_pm25_hourly$mean_pm25[not_harmattan_pm25_hourly$cooking_period == "Non-Active Cooking Hours"], na.rm = TRUE)
+sd(not_harmattan_pm25_hourly$mean_pm25[not_harmattan_pm25_hourly$cooking_period == "Non-Active Cooking Hours"], na.rm = TRUE)
+
+mean(not_harmattan_pm25_hourly$mean_pm25[not_harmattan_pm25_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+sd(not_harmattan_pm25_hourly$mean_pm25[not_harmattan_pm25_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+```
+
+```{r pm25 trends harmattan and cooktime plot, echo=FALSE, message=FALSE, warning=FALSE}
+## PLOTTING THE COMPARISONS 
+
+base_plot <- pm25_community_hourly %>% 
+  mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan")) %>%
+  mutate(
+    cooking_period = factor(case_when(
+      hour >= 15 & hour <= 18 ~ "Active Cooking Hours",
+      (hour < 15 | hour > 18) & hour != 3 ~ "Non-Active Cooking Hours",
+      hour == 3 ~ "Control Hour"
+    ), levels = c("Active Cooking Hours", "Non-Active Cooking Hours", "Control Hour"))
+  ) %>%
+  filter(!is.na(hour)) %>%
+  ggplot(aes(x = harmattan, y = mean_pm25, fill = cooking_period)) +
+  geom_boxplot() +
+  theme_classic() +
+  labs(y = "PM 2.5 Concentration", 
+       x = "Season",
+       fill = "Cooking\nPeriod") +  # Change legend title and add line breaks
+  theme(legend.position = "right") +
+  scale_fill_manual(values = c(
+    "Active Cooking Hours" = "goldenrod", 
+    "Non-Active Cooking Hours" = "#52b3eb", 
+    "Control Hour" = "#b672e0"
+  ),
+  labels = c("Evening Cooking Hours (4pm-8pm)", "Other Hours (Excluding Evening Cooking \nand Control Hours)", "Control Hour (3am)"))  # Add line breaks in legend labels
+
+
+base_plot +
+  geom_segment(aes(x = 0.72, xend = 0.98, y = 545, yend = 545), color = "black") +  # Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 0.85, y = 550, label = "***") +
+  
+  geom_segment(aes(x = 1.02, xend = 1.28, y = 545, yend = 545), color = "black") +  # Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 1.15, y = 550, label = "***") +
+  
+  geom_segment(aes(x = 0.72, xend = 1.27, y = 565, yend = 565), color = "black") +  # Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 1, y = 570, label = "***") +
+  
+  geom_segment(aes(x = 1.72, xend = 1.98, y = 360, yend = 360), color = "black") +  # Not Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 1.85, y = 365, label = "***") +
+  
+  geom_segment(aes(x = 2.02, xend = 2.28, y = 360, yend = 360), color = "black") +  # Not Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 2.15, y = 365, label = "***") +
+  
+  geom_segment(aes(x = 1.72, xend = 2.27, y = 380, yend = 380), color = "black") +  # Not Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 2, y = 385, label = "***") +
+  
+  geom_segment(aes(x = 1, xend = 2, y = 590, yend = 590), color = "black") +  # Harmattan vs Not Harmattan
+  annotate("text", x = 1.5, y = 600, label = "***") +
+  
+  labs(caption ="Comparisons and their significance are denoted by the horizontal lines, where the three stars indicate p < 0.001.") +
+  
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    legend.text = element_text(size = 10), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    plot.caption = element_text(size = 11),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+  )
+
+```
+
+
+### Spatial Correlation
+
+```{r spatial correlation 25, echo=FALSE, message=FALSE, warning=FALSE}
+generate_spatial_pollution_map(pm25_corrected, "pm25", missing_monitor_location)
+```
+
+### Calculate Moran I for Spatial Correlation
+
+```{r moran i 25, echo=FALSE, message=FALSE, warning=FALSE}
+calculate_moran_i(pm25_corrected, "pm25", missing_monitor_location)
+```
+
+
+## Moran I look nicer
+
+```{r formatting moran i, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Define parameters
+pollutant <- "pm25"
+k <- 5
+
+#file_name <- "pm25_moran_table.png"
+
+
+## DURING HARMATTAN ----
+
+# Calculate summary statistics
+summary_stats <- pm25_corrected %>%
+  filter(date >= harmattan_start & date < harmattan_end) %>%
+  group_by(monitor) %>%
+  summarize(
+    mean_value = mean(!!sym(pollutant), na.rm = TRUE),
+    median_value = median(!!sym(pollutant), na.rm = TRUE),
+    sd_value = sd(!!sym(pollutant), na.rm = TRUE)
+  )
+
+monitor_data <- monitor_points %>%
+  left_join(summary_stats, by = "monitor")
+
+# Convert monitor data to spatial object using sf
+monitor_sf <- st_as_sf(monitor_data)
+
+# Calculate distance-based spatial weights
+coords <- st_coordinates(monitor_sf)
+nb <- knn2nb(knearneigh(coords, k = k)) # k-nearest neighbors
+listw <- nb2listw(nb, style = "W")
+
+# Calculate Moran's I
+moran_result <- moran.test(monitor_sf$mean_value, listw)
+
+# Extract relevant values directly
+observed_value <- round(as.numeric(moran_result$estimate["Moran I statistic"]), 4)
+expected_value <- round(as.numeric(moran_result$estimate["Expectation"]), 4)
+variance <- round(as.numeric(moran_result$estimate["Variance"]), 4)
+z_score <- round(as.numeric(moran_result$statistic), 4)
+p_value <- round(as.numeric(moran_result$p.value), 4)
+
+# Create the Moran's I results table
+moran_table <- data.frame(
+  Test = "Moran's I Statistic",
+  `Observed Value` = observed_value,
+  `Expected Value` = expected_value,
+  `Variance` = variance,
+  `Z-score` = z_score,
+  `p-value` = p_value
+)
+
+# Format the table using kableExtra
+formatted_table <- moran_table %>%
+  kable("html", booktabs = TRUE, caption = "Moran's I Test Results: PM 2.5 Shows Spatial Correlation During Harmattan") %>%
+  kable_styling(full_width = FALSE, position = "center", latex_options = c("hold_position", "striped"))
+
+
+
+## OUTSIDE OF HARMATTAN ----
+
+# Calculate summary statistics
+summary_stats <- pm25_corrected %>%
+  filter(date < harmattan_start | date <= harmattan_end) %>%
+  group_by(monitor) %>%
+  summarize(
+    mean_value = mean(!!sym(pollutant), na.rm = TRUE),
+    median_value = median(!!sym(pollutant), na.rm = TRUE),
+    sd_value = sd(!!sym(pollutant), na.rm = TRUE)
+  )
+
+monitor_data <- monitor_points %>%
+  left_join(summary_stats, by = "monitor")
+
+# Convert monitor data to spatial object using sf
+monitor_sf <- st_as_sf(monitor_data)
+
+# Calculate distance-based spatial weights
+coords <- st_coordinates(monitor_sf)
+nb <- knn2nb(knearneigh(coords, k = k)) # k-nearest neighbors
+listw <- nb2listw(nb, style = "W")
+
+# Calculate Moran's I
+moran_result <- moran.test(monitor_sf$mean_value, listw)
+
+# Extract relevant values directly
+observed_value <- round(as.numeric(moran_result$estimate["Moran I statistic"]), 4)
+expected_value <- round(as.numeric(moran_result$estimate["Expectation"]), 4)
+variance <- round(as.numeric(moran_result$estimate["Variance"]), 4)
+z_score <- round(as.numeric(moran_result$statistic), 4)
+p_value <- round(as.numeric(moran_result$p.value), 4)
+
+# Create the Moran's I results table
+moran_table <- data.frame(
+  Test = "Moran's I Statistic",
+  `Observed Value` = observed_value,
+  `Expected Value` = expected_value,
+  `Variance` = variance,
+  `Z-score` = z_score,
+  `p-value` = p_value
+)
+
+# Format the table using kableExtra
+formatted_table <- moran_table %>%
+  kable("html", booktabs = TRUE, caption = "Moran's I Test Results: PM 2.5 Shows Spatial Correlation Outside of Harmattan") %>%
+  kable_styling(full_width = FALSE, position = "center", latex_options = c("hold_position", "striped"))
+
+```
+
+
+
+### Making maps for each size class
+
+```{r pm maps during harmattan, echo=FALSE, message=FALSE, warning=FALSE}
+# DURING HARMATTAN ----
+
+#PM 2.5
+pm25_summary <- pm25_corrected %>%
+  filter(date >= harmattan_start & date < harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_pm25 = mean(pm25, na.rm = TRUE),
+            median_pm25 = median(pm25, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = pm25_summary, aes(geometry = geometry, color = mean_pm25), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean PM 2.5 for Each Monitor During Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d",
+                       breaks = c(min(pm25_summary$mean_pm25), 75, 100, max(pm25_summary$mean_pm25)),
+                       labels = c(paste(round(min(pm25_summary$mean_pm25),0)), "75", "100", paste(round(max(pm25_summary$mean_pm25),0))),
+                       name = "PM 2.5 \n(µg/m³)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+
+
+#PM 1
+pm1_summary <- pm1_corrected %>%
+  filter(date >= harmattan_start & date < harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_pm1 = mean(pm1, na.rm = TRUE),
+            median_pm1 = median(pm1, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = pm1_summary, aes(geometry = geometry, color = mean_pm1), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean PM 1 for Each Monitor During Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d", 
+                       breaks = c(min(pm1_summary$mean_pm1), 60, 85, max(pm1_summary$mean_pm1)),
+                       labels = c(paste(round(min(pm1_summary$mean_pm1),0)), "60", "85", paste(round(max(pm1_summary$mean_pm1),0))),
+                       name = "PM 1 \n(µg/m³)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Incr ease plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+
+
+
+#PM 10
+pm10_summary <- pm10_corrected %>%
+  filter(date >= harmattan_start & date < harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_pm10 = mean(pm10, na.rm = TRUE),
+            median_pm10 = median(pm10, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = pm10_summary, aes(geometry = geometry, color = mean_pm10), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean PM 10 for Each Monitor During Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d",
+                       breaks = c(min(pm10_summary$mean_pm10, na.rm = TRUE), 210, 365, max(pm10_summary$mean_pm10)),
+                       labels = c(paste(round(min(pm10_summary$mean_pm10),0)), "210", "365", paste(round(max(pm10_summary$mean_pm10),0))),
+                       name = "PM 10 \n(µg/m³)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+
+
+```
+
+```{r pm maps NOT during harmattan, echo=FALSE, message=FALSE, warning=FALSE}
+# NOT DURING HARMATTTAN ----
+
+pm25_summary <- pm25_corrected %>%
+  filter(date < harmattan_start | date >= harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_pm25 = mean(pm25, na.rm = TRUE),
+            median_pm25 = median(pm25, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = pm25_summary, aes(geometry = geometry, color = mean_pm25), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean PM 2.5 for Each Monitor Outside of Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1",  high = "#eb4c2d",
+                       breaks = c(min(pm25_summary$mean_pm25, na.rm = TRUE), 45,70, max(pm25_summary$mean_pm25)),
+                       labels = c(paste(round(min(pm25_summary$mean_pm25),0)), "45", "70", paste(round(max(pm25_summary$mean_pm25),0))),
+                       name = "PM 2.5 \n(µg/m³)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+
+
+
+## DECISION TO RECREATE PLOT ABOVE WITH 3 POINT COLOR SCALE SO OUTLIER DOESN'T SKEW VARIABILITY OF OTHER POINTS
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = pm25_summary, aes(geometry = geometry, color = mean_pm25), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean PM 2.5 for Each Monitor Outside of Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient2(low = "#0540a1", mid = "#eb4c2d", high = "goldenrod", 
+                        midpoint = 55,  # Set the midpoint value
+                        breaks = c(min(pm25_summary$mean_pm25, na.rm = TRUE), 55, max(pm25_summary$mean_pm25)),
+                        labels = c(paste(round(min(pm25_summary$mean_pm25),0)), "55", paste(round(max(pm25_summary$mean_pm25),0))),
+                        name = "PM 2.5 \n(µg/m³)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+
+
+
+
+pm1_summary <- pm1_corrected %>%
+  filter(date < harmattan_start | date <= harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_pm1 = mean(pm1, na.rm = TRUE),
+            median_pm1 = median(pm1, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = pm1_summary, aes(geometry = geometry, color = mean_pm1), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean PM 1 for Each Monitor Outside of Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d", 
+                       breaks = c(min(pm1_summary$mean_pm1), 40, 55, max(pm1_summary$mean_pm1)),
+                       labels = c(paste(round(min(pm1_summary$mean_pm1),0)), "40", "55", paste(round(max(pm1_summary$mean_pm1),0))),
+                       name = "PM 1 \n(µg/m³)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+
+
+
+
+pm10_summary <- pm10_corrected %>%
+  filter(date < harmattan_start | date <= harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_pm10 = mean(pm10, na.rm = TRUE),
+            median_pm10 = median(pm10, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = pm10_summary, aes(geometry = geometry, color = mean_pm10), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean PM 10 for Each Monitor Outside of Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d", 
+                       breaks = c(min(pm10_summary$mean_pm10, na.rm = TRUE), 140, 230, max(pm10_summary$mean_pm10)),
+                       labels = c(paste(round(min(pm10_summary$mean_pm10),0)), "140", "230", paste(round(max(pm10_summary$mean_pm10),0))),
+                       name = "PM 10 \n(µg/m³)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+
+```
+
+
+
+## HEATMAP CUSTOMIZATION
+
+```{r heatmap customization, echo = FALSE, warning=FALSE, message=FALSE}
+## PM 25
+ 
+pm25_community_hourly <- pm25_community_hourly %>%
+    mutate(date = ymd(date))  # Use lubridate to ensure date conversion
+  
+heat_map_data <- pm25_community_hourly %>%
+    group_by(date, hour) %>%
+    summarize(mean_pm25 = mean(mean_pm25, na.rm = TRUE), .groups = 'drop') %>%
+    ungroup() %>%
+    mutate(day = day(date),
+           month = factor(format(date, "%b"), levels = c("Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul")),
+           year = year(date)) %>%
+  mutate(log_mean_pm25 = log(mean_pm25))
+
+
+ggplot(heat_map_data, aes(day, hour, fill = mean_pm25)) +
+    geom_tile(color = NA, size = 0) + 
+    scale_fill_gradientn(
+        colors = c("#221f26", "#3f2363", "#872CA2", "#D44292", "#F98477", "#EDD9A1", "#fffceb"), # Specify your custom colors
+        values = scales::rescale(c(0, 5, 12, 20, 40, 60, 100)), # Set breaks; adjust these values based on your data range
+        name = "PM 2.5 \n(µg/m³)"
+    ) + 
+    facet_grid(~month) +
+    scale_y_continuous(trans = "reverse", breaks = unique(heat_map_data$hour)) +
+    scale_x_continuous(breaks = c(1, 10, 20, 31)) +
+    theme_minimal(base_size = 8) +
+    labs(x = "Day",
+         y = "Hour") + 
+    theme(legend.position = "right",
+          plot.title = element_text(size = 14, hjust = 0),
+          axis.text.y = element_text(size = 10),
+          strip.background = element_rect(colour = "white"),
+          strip.text = element_text(size = 13),   # Increase facet group text size
+          axis.ticks = element_blank(),
+          axis.text = element_text(size = 10),
+          legend.title = element_text(size = 12),
+          legend.text = element_text(size = 11),
+          axis.title.y = element_text(size = 14),
+          axis.title.x = element_text(size = 14),
+          panel.background = element_blank())
+
+
+
+
+## PM 10 ----
+
+pm10_community_hourly <- pm10_community_hourly %>%
+    mutate(date = ymd(date))  # Use lubridate to ensure date conversion
+  
+heat_map_data <- pm10_community_hourly %>%
+    group_by(date, hour) %>%
+    summarize(mean_pm10 = mean(mean_pm10, na.rm = TRUE), .groups = 'drop') %>%
+    ungroup() %>%
+    mutate(day = day(date),
+           month = factor(format(date, "%b"), levels = c("Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul")),
+           year = year(date)) %>%
+  mutate(log_mean_pm10 = log(mean_pm10))
+
+
+ggplot(heat_map_data, aes(day, hour, fill = mean_pm10)) +
+    geom_tile(color = NA, size = 0) + 
+    scale_fill_gradientn(
+        colors = c("#221f26", "#3f2363", "#872CA2", "#D44292", "#F98477", "#EDD9A1", "#fffceb"), 
+        values = scales::rescale(c(0, 5, 10, 20, 40, 60, 100)),
+        breaks = c(5, 250, 500, 750, 950),  # Add more breaks
+        labels = c("5", "250", "500", "750", "950"),  # Corresponding labels
+        name = "PM 10 \n(µg/m³)"
+    ) + 
+    facet_grid(~month) +
+    scale_y_continuous(trans = "reverse", breaks = unique(heat_map_data$hour)) +
+    scale_x_continuous(breaks = c(1, 10, 20, 31)) +
+    theme_minimal(base_size = 8) +
+    labs(x = "Day",
+         y = "Hour") + 
+    theme(legend.position = "right",
+          plot.title = element_text(size = 14, hjust = 0),
+          axis.text.y = element_text(size = 10),
+          strip.background = element_rect(colour = "white"),
+          strip.text = element_text(size = 13),  
+          axis.ticks = element_blank(),
+          axis.text = element_text(size = 10),
+          legend.title = element_text(size = 12),
+          legend.text = element_text(size = 11),
+          axis.title.y = element_text(size = 14),
+          axis.title.x = element_text(size = 14),
+          panel.background = element_blank())
+
+
+```
+
+
+## ROAD FURTHER EXPLORATION AND CUSTOMIZATION 
+
+```{r prep road data, echo=FALSE, message=FALSE, warning=FALSE}
+# groups road types so sample size for regression is better
+roads_filtered_grouped <- roads_filtered %>%
+  mutate(highway = case_when(highway %in% c("secondary", "trunk", "tertiary") ~ "City Connection",
+                             highway == "residential" ~ "Residential",
+                             TRUE ~ "Other")) 
+
+
+# prepare data
+missing_monitor_location_sf <- missing_monitor_location %>% select(everything(), geometry) %>% st_as_sf()
+
+# 100 meter buffer: Medgyesi et al. (2023), the 100-meter buffer is relevant to the first-order decay of air pollutants from major roadways and is associated with increased health risks
+monitor_buffers <- st_buffer(missing_monitor_location_sf, dist = 100)
+
+roads_within_buffers <- st_intersection(roads_filtered_grouped, monitor_buffers) %>%
+  mutate(road_length = st_length(geometry))
+
+#count length of road within 100 m buffer
+total_road_length_per_monitor <- roads_within_buffers %>%
+  group_by(monitor) %>%
+  summarize(total_length = sum(road_length)) %>%
+  ungroup() %>%
+  st_drop_geometry()
+
+#add road length data to location data 
+monitor_with_road_lengths <- left_join(missing_monitor_location_sf, total_road_length_per_monitor, by = "monitor") %>%
+  mutate(total_length = as.numeric(total_length)) %>%
+  mutate(total_length = case_when(
+    is.na(total_length) ~ 0,
+    TRUE ~ total_length
+  )) 
+```
+
+```{r harmattan roads, echo=FALSE, message=FALSE, warning=FALSE}
+# calculate monitor summary stats during harmattan to compare seasonality
+summary_stats_harmattan <- pm25_corrected %>%
+  filter(date >= harmattan_start |
+         date < harmattan_end) %>%
+    group_by(monitor) %>%
+    summarize(
+      mean_value = mean(pm25, na.rm = TRUE),
+      median_value = median(pm25, na.rm = TRUE),
+      sd_value = sd(pm25, na.rm = TRUE)
+    )
+
+# Merge with monitor location data
+monitor_data <- monitor_with_road_lengths %>%
+  left_join(summary_stats_harmattan, by = "monitor")
+  
+# Convert monitor data to spatial object using sf
+monitor_sf <- st_as_sf(monitor_data)
+  
+# Calculate distance to nearest road and get the nearest road index
+nearest_roads <- st_nearest_feature(monitor_sf, roads_filtered_grouped)
+distances <- st_distance(monitor_sf, roads_filtered_grouped[nearest_roads, ], by_element = TRUE)
+  
+# Add distances and nearest road type to the monitor data
+monitor_sf <- monitor_sf %>%
+  mutate(
+    distance_to_road = as.numeric(distances),
+    road_type = roads_filtered_grouped$highway[nearest_roads],
+    road_surface = roads_filtered_grouped$surface[nearest_roads]
+
+    ) 
+
+close_roads <- monitor_sf %>% 
+  #filter(distance_to_road < 200) %>%
+  left_join(monitor_community_populations, by = "monitor") %>%
+  mutate(main_road = ifelse(location %in% c("Amoma", "Anyima", "Krabonso", "Ampoma", "Kokuma"), 
+                            "Not Main Road", 
+                            "Main Road"))
+
+
+
+population_road_model <- lm(log(mean_value) ~ log(population) + main_road, data = close_roads)
+
+summary(population_road_model)
+
+# Model summaries
+model_name_pop_road <- paste("Log of Mean PM 2.5 Regressed on Population and Primary Road Status")
+
+model_list <- setNames(list(population_road_model), 
+                       c(model_name_pop_road))
+
+summary_table <- modelsummary(
+  model_list, 
+  #coef_rename = c("distance_to_road" = "Distance to Road", "total_length" = "Road Length within 100m Buffer"),
+  gof_omit = "AIC|BIC|Log.Lik",
+  estimate = "{estimate} ({std.error}){stars}",
+  statistic = "p.value"
+)
+
+```
+
+
+```{r population vs pm25 during harmattan, echo=FALSE, message=FALSE, warning=FALSE}
+## PLOT OF PM
+
+coefs <- summary(population_road_model)$coefficients
+slope <- coefs["log(population)", "Estimate"]
+p_value <- coefs["log(population)", "Pr(>|t|)"]
+  
+
+# Plot considering road type
+close_roads %>%
+  #filter(population < 20000) %>%
+  ggplot(aes(x = log(population), y = log(mean_value))) +
+  geom_point(aes(x = log(population), y = log(mean_value))) +
+  geom_smooth(aes(x = log(population), y = log(mean_value)), method = "lm", se = FALSE) +
+  annotate("text", x = Inf, y = Inf, label = paste("Slope:", round(slope, 2), "\nP-value:", round(p_value, 3)),
+             hjust = 1.7, vjust = 7, size = 4, color = "black") +
+  labs(x = "Log of Community Population",
+       y = "Log of Average PM 2.5 Reading") +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    legend.text = element_text(size = 10), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+  )
+```
+
+
+## roads excluding harmattan
+```{r non harmattan roads, echo=FALSE, message=FALSE, warning=FALSE}
+summary_stats_non_harmattan <- pm25_corrected %>%
+  filter(date < harmattan_start |
+         date >= harmattan_end) %>%
+    group_by(monitor) %>%
+    summarize(
+      mean_value = mean(pm25, na.rm = TRUE),
+      median_value = median(pm25, na.rm = TRUE),
+      sd_value = sd(pm25, na.rm = TRUE)
+    )
+
+# Merge with monitor location data
+monitor_data <- monitor_with_road_lengths %>%
+  left_join(summary_stats_non_harmattan, by = "monitor")
+  
+  # Convert monitor data to spatial object using sf
+monitor_sf <- st_as_sf(monitor_data)
+  
+  # Calculate distance to nearest road and get the nearest road index
+nearest_roads <- st_nearest_feature(monitor_sf, roads_filtered_grouped)
+distances <- st_distance(monitor_sf, roads_filtered_grouped[nearest_roads, ], by_element = TRUE)
+  
+  # Add distances and nearest road type to the monitor data
+monitor_sf <- monitor_sf %>%
+  mutate(
+    distance_to_road = as.numeric(distances),
+    road_type = roads_filtered_grouped$highway[nearest_roads]
+    ) 
+
+close_roads <- monitor_sf %>% 
+  #filter(distance_to_road < 200) %>%
+  left_join(monitor_community_populations, by = "monitor") %>%
+  mutate(main_road = ifelse(location %in% c("Amoma", "Anyima", "Krabonso", "Ampoma", "Kokuma"), 
+                            "Not Main Road", 
+                            "Main Road"))
+
+population_road_model <-lm(log(mean_value) ~ log(population) + main_road, data = close_roads)
+
+# Model summaries
+model_name_pop_road <- paste("Log of Mean PM 2.5 Regressed on Population and Primary Road Status")
+
+model_list <- setNames(list(population_road_model), 
+                       c(model_name_pop_road))
+
+summary_table <- modelsummary(
+  model_list, 
+  #coef_rename = c("distance_to_road" = "Distance to Road", "total_length" = "Road Length within 100m Buffer"),
+  gof_omit = "AIC|BIC|Log.Lik",
+  estimate = "{estimate} ({std.error}){stars}",
+  statistic = "p.value"
+)
+  
+  
+  
+
+coefs <- summary(population_road_model)$coefficients
+slope <- coefs["log(population)", "Estimate"]
+p_value <- coefs["log(population)", "Pr(>|t|)"]
+  
+```
+
+```{r pop vs mean pm25 NOT harmattan, echo=FALSE, message=FALSE, warning=FALSE}}
+
+# Plot considering road type
+close_roads %>%
+  #filter(population < 20000) %>%
+  ggplot(aes(x = log(population), y = log(mean_value))) +
+  geom_point(aes(x = log(population), y = log(mean_value))) +
+  geom_smooth(aes(x = log(population), y = log(mean_value)), method = "lm", se = FALSE) +
+  annotate("text", x = Inf, y = Inf, label = paste("Slope:", round(slope, 2), "\nP-value:", round(p_value, 3)),
+             hjust = 1.7, vjust = 7, size = 4, color = "black") +
+  labs(x = "Log of Community Population",
+       y = "Log of Average PM 2.5 Reading") +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    legend.text = element_text(size = 10), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+  )
+
+```
+
+
+
+## APPENDIX PLOTS
+
+```{r time series pm25 individual monitor locations facet, echo=FALSE, warning= FALSE, message=FALSE}
+monitor_names <- tibble::tribble(
+  ~monitor, ~description, ~location,
+  "MOD-PM-00887", "Babator", "Babatokuma GH",
+  "MOD-PM-00881", "Mo-line", "Kintampo GH",
+  "MOD-PM-01052", "Kokuma", "Kokuma GH",
+  "MOD-PM-01055", "Krabonso", "Krabonso GH",
+  "MOD-PM-00893", "Jato Akura", "Jato Akura GH",
+  "MOD-PM-01060", "Kintampo Central College Areas", "Kintampo GH",
+  "MOD-PM-00899", "Nante", "Nante GH",
+  "MOD-00399", "Dwenewoho", "Dwenewoho GH",
+  "MOD-PM-01057", "Sorunuase", "Sorunuase GH",
+  "MOD-PM-00877", "Pamdu", "Pamdu GH",
+  "MOD-PM-00898", "Anokyekrom", "Anokyekrom GH",
+  "MOD-PM-00900", "Kawampe", "Kawampe GH",
+  "MOD-PM-00883", "Portor", "Portor GH",
+  "MOD-00398", "Kurawura Akura", "Kurawura Akura GH",
+  "MOD-PM-00884", "KHRC Residency", "Kintampo GH",
+  "MOD-PM-01056", "Gulumpe", "Gulumpe GH",
+  "MOD-PM-00879", "Dawadawa", "Dawadawa GH",
+  "MOD-PM-00897", "Pramposo", "Pramposo GH",
+  "MOD-PM-01053", "Anyima", "Anyima GH",
+  "MOD-PM-00880", "Kadelso", "Kadelso GH",
+  "MOD-PM-01051", "Weila", "Weila GH",
+  "MOD-PM-01058", "Krutakyi", "Krutakyi GH",
+  "MOD-PM-00895", "Ntankro", "Kintampo GH",
+  "MOD-PM-00889", "Beposo", "Beposo GH",
+  "MOD-PM-00882", "Apaaso", "Kintampo GH",
+  "MOD-PM-01059", "Paninamisa", "Paninamisa GH",
+  "MOD-00397", "Apesika", "Apesika GH",
+  "MOD-PM-00878", "Jema Pentecost", "Jema GH",
+  "MOD-00401", "New Longoro", "New Longoro GH",
+  "MOD-PM-00891", "Habitat", "Kintampo GH",
+  "MOD-PM-00885", "Kwabia", "Kwabia GH",
+  "MOD-PM-00890", "Akora", "Akora GH",
+  "MOD-PM-00876", "Amoma", "Amoma GH",
+  "MOD-PM-00888", "Nante Zongo", "Nante Zongo GH",
+  "MOD-PM-00894", "Alhassan Akura", "Alhassan Akura GH",
+  "MOD-00400", "Kintampo-PTC Area (Magazine)", "Kintampo GH",
+  "MOD-PM-01054", "Ampoma", "Ampoma GH",
+  "MOD-PM-00896", "Asantekwaa", "Asantekwaa GH",
+  "MOD-PM-00886", "Jema Zongo", "Jema GH",
+  "MOD-PM-00892", "Atta Akura", "Atta Akura GH"
+)
+
+monitor_names <- monitor_names %>%
+  mutate(location = gsub(" GH", "", location)) %>%
+  mutate(locations = if_else(grepl("Kintampo", location),
+                            paste(description, location, sep = ", "),
+                            location))
+
+
+
+
+# Custom function to add line breaks at a specific length
+add_line_breaks <- function(x, width) {
+  sapply(x, function(y) {
+    if (nchar(y) > width) {
+      paste(strwrap(y, width = width), collapse = "\n")
+    } else {
+      y
+    }
+  })
+}
+
+# Apply custom function to locations
+monitor_names <- monitor_names %>%
+  mutate(locations = if_else(grepl("Kintampo", location),
+                             paste(description, "Kintampo", sep = "\n"),
+                             location)) %>%
+  mutate(locations = add_line_breaks(locations, width = 20))
+
+# Plot with updated facet labels
+pm25_corrected %>%
+  left_join(monitor_names) %>%
+  group_by(date, locations) %>%
+  summarize(mean_pm25 = mean(pm25, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_pm25)) +
+  geom_line(color = "black", alpha = 1) +
+  theme_minimal() +
+  facet_wrap(~locations) +
+  labs(y = "Mean PM 2.5") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.title = element_text(size = 14),
+    strip.text = element_text(size = 11)  # Increase facet group text size
+  )
+
+```
+
+
+
+
+
+## DATA REQUEST FROM STEVE
+
+```{r}
+# average_each_monitor <- full_join(pm1_community_hourly, pm25_community_hourly) %>%
+#   mutate(date = as.Date(date)) %>%
+#   full_join(pm10_community_hourly) %>%
+#   filter(!is.na(hour)) %>%
+#   select(monitor, date, hour, mean_pm1, mean_pm25, mean_pm10) %>%
+#   mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan"))
+# 
+# 
+# average_across_monitors <- average_each_monitor %>%
+#   group_by(date, hour) %>% 
+#   summarise(
+#     avg_pm1 = mean(mean_pm1, na.rm = TRUE),
+#     avg_pm25 = mean(mean_pm25, na.rm = TRUE),
+#     avg_pm10 = mean(mean_pm10, na.rm = TRUE),
+#     n_pm1 = sum(!is.na(mean_pm1)),
+#     n_pm25 = sum(!is.na(mean_pm25)),
+#     n_pm10 = sum(!is.na(mean_pm10))
+#   ) %>%
+#     mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan"))
+# 
+# 
+# write_csv(average_across_monitors, here("fleet_diurnal_hourly_average.csv"))
+# 
+
+
+
+```
+
+
+## DATA REQUEST FROM KHOLISWA
+
+```{r}
+write_rds(pm1_community_merged, here("data", "cloud_sd_merged", "pm1_community_merged.rds"))
+write_rds(pm25_community_merged, here("data", "cloud_sd_merged", "pm25_community_merged.rds"))
+write_rds(pm10_community_merged, here("data", "cloud_sd_merged", "pm10_community_merged.rds"))
+# 
+# pm1_community_merged <- fread(here("data", "cloud_sd_merged", "pm1_community_merged.csv"), showProgress = TRUE) %>%
+#   filter(!is.na(hour))
+# 
+# pm25_community_merged <- fread(here("data", "cloud_sd_merged", "pm25_community_merged.csv"), showProgress = TRUE) %>%
+#   filter(!is.na(hour))
+# 
+# pm10_community_merged <- fread(here("data", "cloud_sd_merged", "pm10_community_merged.csv"), showProgress = TRUE)%>%
+#   filter(!is.na(hour))
+# 
+
+first_join <- full_join(pm1_community_merged, pm25_community_merged)
+
+second_join <- full_join(first_join, pm10_community_merged)
+
+
+
+write_rds(pm1_corrected, here("data", "cloud_sd_merged", "pm1_corrected.csv"))
+write_rds(pm25_corrected, here("data", "cloud_sd_merged", "pm25_corrected.csv"))
+write_rds(pm10_corrected, here("data","cloud_sd_merged", "pm10_corrected.csv"))
+
+pm1_corrected <- read_rds(here("data","cloud_sd_merged", "pm1_corrected.csv"))
+pm25_corrected <- read_rds(here("data","cloud_sd_merged", "pm25_corrected.csv"))
+pm10_corrected <- read_rds(here("data", "cloud_sd_merged","pm10_corrected.csv"))
+
+
+pm1_corrected <- pm1_corrected %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+
+pm25_corrected <- pm25_corrected %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+
+pm10_corrected <- pm10_corrected %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+
+
+pm1_corrected <- fread(here("data", "cloud_sd_merged","pm1_corrected.csv"), showProgress = TRUE) %>%
+  filter(!is.na(hour))
+
+pm25_corrected <- fread(here("data", "cloud_sd_merged","pm25_corrected.csv"), showProgress = TRUE) %>%
+  filter(!is.na(hour))
+
+pm10_corrected <- fread(here("data", "cloud_sd_merged","pm10_corrected.csv"), showProgress = TRUE)%>%
+  filter(!is.na(hour))
+
+
+
+first_join <- full_join(pm1_corrected, pm25_corrected)
+
+second_join <- full_join(first_join, pm10_corrected)
+
+
+
+write_rds(second_join, here("data", "corrected_full_data.rds"))
+
+
+```
+
