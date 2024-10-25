@@ -1,5 +1,5 @@
 ---
-title: "Ghana Air Quality Analysis"
+title: "Ghana Air Quality Report"
 output: 
   html_document:
     toc: true
@@ -87,7 +87,7 @@ source(here("src", "calc_gas_regressions.R"))
 location_columns <- c("monitor", "geo_lat", "geo_lon", "date")
 
 # read in the monitor location data using fread to handle large dataset
-location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", 
+location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", 
                        select = location_columns, 
                        showProgress = TRUE)
 
@@ -116,9 +116,9 @@ monitor_points <- st_as_sf(monitor_locations, coords = c("geo_lon", "geo_lat"), 
 
 # LOAD IN THE COUNTRY AND REGION MAP DATA ----
 
-country <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm0_gss_20210308.shp"), quiet = TRUE)
+country <- st_read(here("data", "gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm0_gss_20210308.shp"), quiet = TRUE)
 
-regions <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20210308.shp"), quiet = TRUE) %>%
+regions <- st_read(here("data", "gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20210308.shp"), quiet = TRUE) %>%
   rename(region = ADM1_EN)
 
 bono_east <- regions %>% filter(region == "Bono East")
@@ -178,7 +178,7 @@ kurawura_akura_sf <- st_as_sf(data.frame(
 # LOAD IN THE ROADS DATA ----
 
 # Load roads data and set CRS (assuming it's EPSG:4326)
-roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
+roads <- st_read(here("data", "hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
 st_crs(roads) <- 4326
 
 
@@ -201,7 +201,7 @@ roads_filtered <- st_intersection(roads, bono_east)
 
 # LOAD WEATHER DATA ----
 
-met_data <- read_rds(here("metall_2023_2024.rds"))
+met_data <- read_rds(here("data", "metall_2023_2024.rds"))
 
 
 
@@ -605,7 +605,7 @@ ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
 
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -613,7 +613,7 @@ mod_files <- list.files(
 
 # List all MOD-PM files with full path
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD-PM", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-PM.*\\.csv"
@@ -660,6 +660,8 @@ full_sd_card = rbind(MOD_sd_card, MOD_PM_sd_card) %>%
 
 # write_csv(full_sd_card, here("data", "full_sd_card.csv"))
 
+full_sd_card <- read_csv(here("data", "SD_data", "full_sd_card.csv"))
+
 
 ## MERGE THE SD DATA WITH THE SERVER DATA ---- 
 
@@ -677,7 +679,6 @@ for (pollutant in pollutants) {
 
 # Process the pollutants
 results <- process_multiple_pollutants(pollutants, raw_data, full_sd_card)
-
 
 ## Summary results
 pm1_colocation_hourly <- results$pm1$summarized$hourly %>% filter(date >= as.Date("2023-08-16") & date <= as.Date("2023-09-20"))
@@ -831,6 +832,8 @@ pm1_corrected <- pm1_community_merged %>%
   rename(pm1 = corrected_pm1)
 
 
+write_rds(pm1_corrected, here("data", "pm1corrected.rds"))
+
 pm25_community_merged <- results$pm25$merged %>% filter(date >= as.Date("2023-09-26"))
 
 pm25_corrected <- pm25_community_merged %>%
@@ -838,6 +841,10 @@ pm25_corrected <- pm25_community_merged %>%
   mutate(corrected_pm25 = (pm25 - intercept) / slope) %>%
   select(monitor, timestamp, date, hour, corrected_pm25, source) %>%
   rename(pm25 = corrected_pm25)
+
+
+write_rds(pm25_corrected, here("data", "pm25corrected.rds"))
+
 
 
 pm10_community_merged <- results$pm10$merged %>% filter(date >= as.Date("2023-09-26"))
@@ -848,19 +855,21 @@ pm10_corrected <- pm10_community_merged %>%
   select(monitor, timestamp, date, hour, corrected_pm10, source) %>%
   rename(pm10 = corrected_pm10)
 
+write_rds(pm10_corrected, here("data", "pm10corrected.rds"))
+
 ## SUMMARIZE BASED ON THE CORRECTED DATA 
 
 summarized_pm1 <- summarize_pollution_times(pm1_corrected, "pm1")
 summarized_pm25 <- summarize_pollution_times(pm25_corrected, "pm25")
 summarized_pm10 <- summarize_pollution_times(pm10_corrected, "pm10")
 
-pm1_community_daily <- summarized_pm1$hourly
+pm1_community_hourly <- summarized_pm1$hourly
 pm1_community_daily <- summarized_pm1$daily
 
-pm25_community_daily <- summarized_pm25$hourly
+pm25_community_hourly <- summarized_pm25$hourly
 pm25_community_daily <- summarized_pm25$daily
 
-pm10_community_daily <- summarized_pm10$hourly
+pm10_community_hourly <- summarized_pm10$hourly
 pm10_community_daily <- summarized_pm10$daily
 ```
 
@@ -1178,6 +1187,17 @@ harmattan_pm25_hourly <- pm25_community_hourly_seasonality %>% filter(date >= ha
 # hourly pm 2.5 data from not harmattan only
 not_harmattan_pm25_hourly <- pm25_community_hourly_seasonality %>% filter(date < harmattan_start | date > harmattan_end) %>%
   filter(!is.na(hour)) 
+
+
+# mean and sd pm25 during harmattan
+mean(harmattan_pm25_hourly$mean_pm25, na.rm = TRUE)
+sd(harmattan_pm25_hourly$mean_pm25, na.rm = TRUE)
+
+# mean and sd pm25 NOT during harmattan
+mean(not_harmattan_pm25_hourly$mean_pm25, na.rm = TRUE)
+sd(not_harmattan_pm25_hourly$mean_pm25, na.rm = TRUE)
+
+
 
 
 # COMPARING COOKTIME PM 2.5 ACROSS ALL SEASONS
@@ -2185,121 +2205,63 @@ pm25_community %>%
 ## DATA REQUEST FROM KHOLISWA
 
 ```{r}
-# write_csv(pm1_community_merged, here("data", "pm1_community_merged.csv"))
-# write_csv(pm25_community_merged, here("data", "pm25_community_merged.csv"))
-# write_csv(pm10_community_merged, here("data", "pm10_community_merged.csv"))
+write_rds(pm1_community_merged, here("data", "cloud_sd_merged", "pm1_community_merged.rds"))
+write_rds(pm25_community_merged, here("data", "cloud_sd_merged", "pm25_community_merged.rds"))
+write_rds(pm10_community_merged, here("data", "cloud_sd_merged", "pm10_community_merged.rds"))
 # 
-# pm1_community_merged <- fread(here("data", "pm1_community_merged.csv"), showProgress = TRUE) %>%
+# pm1_community_merged <- fread(here("data", "cloud_sd_merged", "pm1_community_merged.csv"), showProgress = TRUE) %>%
 #   filter(!is.na(hour))
 # 
-# pm25_community_merged <- fread(here("data", "pm25_community_merged.csv"), showProgress = TRUE) %>%
+# pm25_community_merged <- fread(here("data", "cloud_sd_merged", "pm25_community_merged.csv"), showProgress = TRUE) %>%
 #   filter(!is.na(hour))
 # 
-# pm10_community_merged <- fread(here("data", "pm10_community_merged.csv"), showProgress = TRUE)%>%
+# pm10_community_merged <- fread(here("data", "cloud_sd_merged", "pm10_community_merged.csv"), showProgress = TRUE)%>%
 #   filter(!is.na(hour))
 # 
-# 
-# first_join <- full_join(pm1_community_merged, pm25_community_merged)
-# 
-# second_join <- full_join(first_join, pm10_community_merged)
-# 
-# 
-# 
-# write_csv(pm1_corrected, here("data", "pm1_corrected.csv"))
-# write_csv(pm25_corrected, here("data", "pm25_corrected.csv"))
-# write_csv(pm10_corrected, here("data", "pm10_corrected.csv"))
-# 
-# 
-# pm1_corrected <- fread(here("data", "pm1_corrected.csv"), showProgress = TRUE) %>%
-#   filter(!is.na(hour))
-# 
-# pm25_corrected <- fread(here("data", "pm25_corrected.csv"), showProgress = TRUE) %>%
-#   filter(!is.na(hour))
-# 
-# pm10_corrected <- fread(here("data", "pm10_corrected.csv"), showProgress = TRUE)%>%
-#   filter(!is.na(hour))
-# 
-# 
-# 
-# first_join <- full_join(pm1_corrected, pm25_corrected)
-# 
-# second_join <- full_join(first_join, pm10_corrected)
-# 
-# 
-# 
-# write_csv(second_join, here("data", "corrected_full_data.csv"))
-# 
 
-```
+first_join <- full_join(pm1_community_merged, pm25_community_merged)
+
+second_join <- full_join(first_join, pm10_community_merged)
 
 
-```{r, include = FALSE}
-# Load necessary libraries
-library(stringr)
-library(fs)
 
-# Define base paths
-base_source_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/sd_card_2024-09-01"  # Location of the downloaded date folders
-base_destination_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/sd_monitor_folders"  # Monitor folders you already created
+write_rds(pm1_corrected, here("data", "cloud_sd_merged", "pm1_corrected.csv"))
+write_rds(pm25_corrected, here("data", "cloud_sd_merged", "pm25_corrected.csv"))
+write_rds(pm10_corrected, here("data","cloud_sd_merged", "pm10_corrected.csv"))
 
-# Ensure monitor folders exist or create them
-for (monitor in monitor_names) {
-  monitor_folder <- file.path(base_destination_path, monitor)
-  if (!dir.exists(monitor_folder)) {
-    dir.create(monitor_folder, recursive = TRUE)
-    message(paste("Created monitor folder:", monitor_folder))
-  }
-}
+pm1_corrected <- read_rds(here("data","cloud_sd_merged", "pm1_corrected.csv"))
+pm25_corrected <- read_rds(here("data","cloud_sd_merged", "pm25_corrected.csv"))
+pm10_corrected <- read_rds(here("data", "cloud_sd_merged","pm10_corrected.csv"))
 
-# Get a list of all date folders in the base source path
-date_folders <- list.dirs(base_source_path, full.names = TRUE, recursive = FALSE)
 
-# Loop through monitor names
-for (monitor in monitor_names) {
-  # Replace all '-' with '_' to match the folder structure (correcting folder format)
-  monitor_id <- str_replace_all(monitor, "-", "_")
-  
-  message(paste("Looking for monitor:", monitor_id))
+pm1_corrected <- pm1_corrected %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
 
-  # Find all matching folders across all date directories
-  matching_folders <- c()
-  
-  for (date_folder in date_folders) {
-    # Find all the source folders that contain the monitor ID in the current date folder
-    current_matching_folders <- list.dirs(date_folder, full.names = TRUE, recursive = TRUE)
-    current_matching_folders <- current_matching_folders[grepl(monitor_id, current_matching_folders)]
-    
-    # Append any matches found
-    if (length(current_matching_folders) > 0) {
-      matching_folders <- c(matching_folders, current_matching_folders)
-    }
-  }
-  
-  # Debug: print the matching folders to check if they're correct
-  if (length(matching_folders) > 0) {
-    message(paste("Monitor:", monitor_id, " - Found matching folders:", paste(matching_folders, collapse = ", ")))
-  } else {
-    warning(paste("No matching folders found for monitor:", monitor_id))
-  }
-  
-  # Move or copy each matching folder into its corresponding monitor directory
-  for (folder in matching_folders) {
-    destination_folder <- file.path(base_destination_path, monitor)
-    destination <- file.path(destination_folder, basename(folder))
-    
-    # Copy the folder but check if files already exist, and avoid overwriting
-    if (dir.exists(folder)) {
-      tryCatch({
-        dir_copy(folder, destination, overwrite = FALSE)  # Avoid overwriting existing files
-        message(paste("Copied", folder, "to", destination))
-      }, error = function(e) {
-        message(paste("Error copying", folder, "to", destination, ":", e$message))
-      })
-    } else {
-      warning(paste("Source folder", folder, "does not exist"))
-    }
-  }
-}
+pm25_corrected <- pm25_corrected %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+
+pm10_corrected <- pm10_corrected %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+
+
+pm1_corrected <- fread(here("data", "cloud_sd_merged","pm1_corrected.csv"), showProgress = TRUE) %>%
+  filter(!is.na(hour))
+
+pm25_corrected <- fread(here("data", "cloud_sd_merged","pm25_corrected.csv"), showProgress = TRUE) %>%
+  filter(!is.na(hour))
+
+pm10_corrected <- fread(here("data", "cloud_sd_merged","pm10_corrected.csv"), showProgress = TRUE)%>%
+  filter(!is.na(hour))
+
+
+
+first_join <- full_join(pm1_corrected, pm25_corrected)
+
+second_join <- full_join(first_join, pm10_corrected)
+
+
+
+write_rds(second_join, here("data", "corrected_full_data.rds"))
 
 
 ```
