@@ -2,6 +2,7 @@ library(dplyr)
 
 # Function to merge data for a given pollutant
 merge_pollutant_data <- function(pm_raw, sd_card_data, pollutant) {
+  
   # Ensure that the timestamp columns are in POSIXct format
   pm_raw <- pm_raw %>%
     mutate(timestamp = as.POSIXct(timestamp, format="%Y-%m-%d %H:%M:%S"))
@@ -23,3 +24,4 @@ merge_pollutant_data <- function(pm_raw, sd_card_data, pollutant) {
   
   return(merged_data)
 }
+
