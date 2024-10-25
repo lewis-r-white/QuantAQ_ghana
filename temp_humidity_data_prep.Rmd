@@ -1,0 +1,158 @@
+---
+title: "Temp Humidity Data Prep"
+output: html_document
+date: "2024-06-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+
+library(here) # file path org
+library(lubridate)# working with dates
+library(tictoc) # timing
+library(DT) # datatables
+library(purrr) # applying functions across df
+library(tidyverse) # data cleaning and plotting
+library(data.table) 
+library(sf) # spatial data 
+library(viridis) # color pallete 
+library(knitr)
+library(modelsummary) # table of regressions
+library(spdep)
+library(gstat)
+library(units) 
+library(gridExtra)
+library(broom)
+library(Metrics) 
+library(kableExtra) # table creation
+
+# source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
+source(here("src", "load_pollution_datasets.R"))
+
+# source function that aggregates data by time scale of interest (hourly, daily)
+source(here("src", "summarize_pollution_times.R"))
+
+# Source function that creates fleet average vs monitor pollutant reading plot
+source(here("src", "compare_fleet_avg_monitor.R"))
+
+# source function to run regression analysis on pollutant / distance to road
+source(here("src", "regress_pollutant_road.R"))
+
+# source function to apply regressions when comparing monitor to fleet average
+source(here("src", "compare_fleet_regression.R"))
+
+# source functions to merge in the SD card data for cases when server data is missing 
+source(here("src", "merge_sd_data.R"))
+source(here("src", "process_multiple_pollutants.R"))
+```
+
+
+```{r}
+## IF DON'T ALREADY HAVE SD CARD DATASET, LOAD IN THE DATA THAT CONTAINS SD CARD INFO. ---- 
+## IF ALREADY HAVE SD CARD DATASET, GO TO NEXT CODE CHUNK  
+
+# List all MOD files with full path
+mod_files <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-00.*\\.csv"
+)
+
+# List all MOD-PM files with full path
+mod_pm_files <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD-PM", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-PM.*\\.csv"
+)
+
+# Function to read, select columns, and add monitor name for MOD files
+read_and_select_mod <- function(file) {
+  # Extract the monitor name from the file name
+  monitor_name <- str_extract(basename(file), "MOD-\\d+")
+  
+  read_csv(file) %>%
+    select(timestamp_iso, sample_temp, sample_rh) %>%
+    mutate(monitor = monitor_name)
+}
+
+# Function to read, select columns, and add monitor name for MOD-PM files
+read_and_select_mod_pm <- function(file) {
+  # Extract the monitor name from the file name
+  monitor_name <- str_extract(basename(file), "MOD-PM-\\d+")
+  
+  read_csv(file) %>%
+    select(timestamp_iso, sample_temp, sample_rh) %>%
+    mutate(monitor = monitor_name)
+}
+
+# Read all MOD files and combine them
+MOD_sd_card <- mod_files %>%
+  map_dfr(read_and_select_mod)
+
+# Read all MOD-PM files and combine them
+MOD_PM_sd_card <- mod_pm_files %>%
+  map_dfr(read_and_select_mod_pm)
+
+
+full_sd_card = rbind(MOD_sd_card, MOD_PM_sd_card)
+
+# write_rds(full_sd_card, here("data", "temp_rh_sd_card.rds"))
+```
+
+
+```{r}
+# LOAD SD CARD DATA
+
+full_sd_card <- read_rds(here("data", "temp_rh", "temp_rh_sd_card.rds"))
+```
+
+
+```{r}
+
+## MERGE THE SD DATA WITH THE SERVER DATA ---- 
+
+# List of pollutants you want to process
+pollutants <- c("temp", "rh")
+
+raw_data <- list()
+
+for (pollutant in pollutants) {
+  load_pollution_datasets(pollutant)
+  # Store the raw data
+  raw_data[[paste0(pollutant, "_raw")]] <- get(paste0(pollutant, "_raw"))
+}
+
+
+full_sd_card <- full_sd_card %>%
+  rename(temp = sample_temp,
+         rh = sample_rh)
+
+# Process the pollutants
+results <- process_multiple_pollutants(pollutants, raw_data, full_sd_card)
+
+
+temp_merged <- results$temp$merged %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+  
+
+rh_merged <- results$rh$merged %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+
+
+temp_rh_full <- full_join(temp_merged, rh_merged) %>%
+  select(monitor, timestamp, date, hour, temp, rh, source)
+
+write_rds(temp_rh_full, here("data", "temp_rh", "temp_rh_full_20241024.rds"))
+
+colocation_rh_temp <- temp_rh_full %>%
+  filter(timestamp >= as.Date("2023-08-16") & timestamp <= as.Date("2023-09-21"))
+
+write_rds(colocation_rh_temp, here("data", "temp_rh", "colocation_temp_rh.rds"))
+```
+
