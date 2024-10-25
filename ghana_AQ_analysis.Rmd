@@ -88,7 +88,7 @@ source(here("src", "calc_gas_regressions.R"))
 location_columns <- c("monitor", "geo_lat", "geo_lon", "date")
 
 # read in the monitor location data using fread to handle large dataset
-location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", 
+location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/cloud/ghana_AQ_parent_full_20240925.csv", 
                        select = location_columns, 
                        showProgress = TRUE)
 
@@ -114,9 +114,9 @@ monitor_points <- st_as_sf(monitor_locations, coords = c("geo_lon", "geo_lat"), 
 
 # LOAD IN THE COUNTRY AND REGION MAP DATA ----
 
-country <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm0_gss_20210308.shp"), quiet = TRUE)
+country <- st_read(here("data", "gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm0_gss_20210308.shp"), quiet = TRUE)
 
-regions <- st_read(here("gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20210308.shp"), quiet = TRUE) %>%
+regions <- st_read(here("data", "gha_admbnda_gss_20210308_SHP", "gha_admbnda_adm1_gss_20210308.shp"), quiet = TRUE) %>%
   rename(region = ADM1_EN)
 
 bono_east <- regions %>% filter(region == "Bono East")
@@ -132,7 +132,7 @@ kintampo_sf <- st_as_sf(data.frame(
 # LOAD IN THE ROADS DATA ----
 
 # Load roads data and set CRS (assuming it's EPSG:4326)
-roads <- st_read(here("hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
+roads <- st_read(here("data", "hotosm_gha_roads_lines_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
 st_crs(roads) <- 4326
 
 
@@ -626,7 +626,7 @@ ggplot(daily_na, aes(x = week, y = day_of_week, fill = na_percent)) +
 
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -634,7 +634,7 @@ mod_files <- list.files(
 
 # List all MOD-PM files with full path
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD-PM", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-PM.*\\.csv"
