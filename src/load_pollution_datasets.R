@@ -1,7 +1,7 @@
 load_pollution_datasets <- function(pollutant) {
   columns <- c("monitor", "timestamp", "date", "hour", pollutant)
   
-  data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/ghana_AQ_parent_full.csv", 
+  data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", 
                 select = columns, showProgress = TRUE)
   
   # Filter out rows with pm10 values above 1500 if the pollutant is pm10. Suggested data error entry. 
@@ -21,3 +21,5 @@ load_pollution_datasets <- function(pollutant) {
   assign(paste0(pollutant, "_colocation"), colocation_data, envir = .GlobalEnv)
   assign(paste0(pollutant, "_community"), community_data, envir = .GlobalEnv)
 }
+
+
