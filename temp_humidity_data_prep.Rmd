@@ -110,6 +110,14 @@ full_sd_card = rbind(MOD_sd_card, MOD_PM_sd_card)
 # LOAD SD CARD DATA
 
 full_sd_card <- read_rds(here("data", "temp_rh", "temp_rh_sd_card.rds"))
+
+#adjust column names to match cloud
+full_sd_card <- full_sd_card %>%
+  rename(temp = sample_temp,
+         rh = sample_rh) %>%
+  mutate(source = "sd_card")
+
+
 ```
 
 
@@ -118,7 +126,7 @@ full_sd_card <- read_rds(here("data", "temp_rh", "temp_rh_sd_card.rds"))
 ## MERGE THE SD DATA WITH THE SERVER DATA ---- 
 
 # List of pollutants you want to process
-pollutants <- c("temp", "rh")
+pollutants <- c("temp", "rh", "met_temp", "met_rh")
 
 raw_data <- list()
 
@@ -129,20 +137,57 @@ for (pollutant in pollutants) {
 }
 
 
-full_sd_card <- full_sd_card %>%
-  rename(temp = sample_temp,
-         rh = sample_rh)
+## COMBINE TEMP AND MET_TEMP
+
+# Only keep MOD devices (excluding MOD-PM) for temp data
+temp_raw_mod <- raw_data$temp_raw %>%
+  filter(str_detect(monitor, "^MOD-[^P]"))  # Matches "MOD-" but not "MOD-PM"
+
+# Only keep MOD-PM devices for met_temp data
+met_temp_raw_mod_pm <- raw_data$met_temp_raw %>%
+  filter(str_detect(monitor, "^MOD-PM")) %>%  # Matches only "MOD-PM" devices
+  rename(temp = met_temp)  # Rename met_temp to temp for consistency
+
+# Combine the filtered temp data
+temp_raw <- bind_rows(temp_raw_mod, met_temp_raw_mod_pm) %>%
+  arrange(monitor, timestamp) %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)  # Deduplicate if needed
+
+
+## COMBINE RH AND MET_RH
+
+# Only keep MOD devices (excluding MOD-PM) for rh data
+rh_raw_mod <- raw_data$rh_raw %>%
+  filter(str_detect(monitor, "^MOD-[^P]"))  # Matches "MOD-" but not "MOD-PM"
+
+# Only keep MOD-PM devices for met_rh data
+met_rh_raw_mod_pm <- raw_data$met_rh_raw %>%
+  filter(str_detect(monitor, "^MOD-PM")) %>%
+  rename(rh = met_rh)  # Rename met_rh to rh for consistency
+
+# Combine the filtered rh data
+rh_raw <- bind_rows(rh_raw_mod, met_rh_raw_mod_pm) %>%
+  arrange(monitor, timestamp) %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+
+
+
+raw_data <- list(temp_raw = temp_raw, 
+                 rh_raw = rh_raw)
+
+
+
+pollutants <- c("temp", "rh") #remove met rh and temp because we have now joined them
+
+
 
 # Process the pollutants
 results <- process_multiple_pollutants(pollutants, raw_data, full_sd_card)
 
 
-temp_merged <- results$temp$merged %>%
-  distinct(monitor, timestamp, .keep_all = TRUE)
-  
+temp_merged <- results$temp$merged 
 
-rh_merged <- results$rh$merged %>%
-  distinct(monitor, timestamp, .keep_all = TRUE)
+rh_merged <- results$rh$merged 
 
 
 temp_rh_full <- full_join(temp_merged, rh_merged) %>%
@@ -154,5 +199,13 @@ colocation_rh_temp <- temp_rh_full %>%
   filter(timestamp >= as.Date("2023-08-16") & timestamp <= as.Date("2023-09-21"))
 
 write_rds(colocation_rh_temp, here("data", "temp_rh", "colocation_temp_rh.rds"))
+```
+
+## check out the data
+
+```{r}
+temp_rh_colocation <- readRDS(here("data", "temp_rh", "colocation_temp_rh.rds"))
+
+temp_rh_colocation %>% filter(!is.na(temp)) %>% group_by(monitor) %>% count()
 ```
 
