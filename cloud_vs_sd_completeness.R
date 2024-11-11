@@ -69,8 +69,8 @@ all_data <- rbindlist(lapply(folders_to_process, function(folder) {
 # saveRDS(all_data, file = "sd_time_data.rds")
 
 # READ IN DATA IF ALREADY GENERATED ----
-all_data <- readRDS(here("data", "sd_time_data.rds")) %>%
-  rename(monitor = parent_folder)
+all_data <- readRDS(here("data", "SD_data", "sd_time_data_20241023.rds")) %>%
+  filter(!is.na(floor_hour))
 
 # remove times outside of study period, specify that hour is complete if at least 100 obs in the hour
 all_sd_clean <- all_data %>%
@@ -134,7 +134,7 @@ ggplot(sd_weekly_filled, aes(x = week, y = monitor, fill = days_with_data)) +
 ### ADDING CLOUD DATA ----
 
 # load in the full cloud dataset 
-final_result_df <- readRDS(here("data" , "processed_monitor_data.rds"))
+final_result_df <- readRDS(here("data" , "cloud", "processed_monitor_data.rds"))
 
 # to decrease file size, select columns of interest and remove rows where pm25 is NA
 cloud_df <- final_result_df %>% 
@@ -294,24 +294,24 @@ combined_summary_table <- sd_cloud_merged_hourly %>%
     sd_latest_timestamp = max(floor_hour[!is.na(hour_complete_sd)]),    # Latest timestamp for SD card data
     sd_total_hours_represented = sum(hour_complete_sd, na.rm = TRUE),   # Total hours represented in SD card data
     sd_total_days_represented = n_distinct(date[!is.na(hour_complete_sd)]),  # Total days represented in SD card data
-    sd_percent_data_available = (sd_total_hours_represented / (as.numeric(difftime(end_date, start_date, units = "days")) * 24)) * 100,  # % SD card data available
+    sd_percent_data_available = round((sd_total_hours_represented / (as.numeric(difftime(end_date, start_date, units = "days")) * 24)) * 100, 2),  # % SD card data available
     
     # Cloud data statistics
     cloud_earliest_timestamp = min(floor_hour[!is.na(hour_complete_cloud)]),  # Earliest timestamp for cloud data
     cloud_latest_timestamp = max(floor_hour[!is.na(hour_complete_cloud)]),    # Latest timestamp for cloud data
     cloud_total_hours_represented = sum(hour_complete_cloud, na.rm = TRUE),   # Total hours represented in cloud data
     cloud_total_days_represented = n_distinct(date[!is.na(hour_complete_cloud)]),  # Total days represented in cloud data
-    cloud_percent_data_available = (cloud_total_hours_represented / (as.numeric(difftime(end_date, start_date, units = "days")) * 24)) * 100,  # % cloud data available
+    cloud_percent_data_available = round((cloud_total_hours_represented / (as.numeric(difftime(end_date, start_date, units = "days")) * 24)) * 100, 2),  # % cloud data available
     
     # Combined SD and Cloud data statistics
     combined_total_hours_represented = sum(pmax(hour_complete_sd, hour_complete_cloud, na.rm = TRUE), na.rm = TRUE),  # Take the max for each hour between SD and Cloud
     combined_total_days_represented = n_distinct(date[hour_complete_sd == 1 | hour_complete_cloud == 1]),  # Count days where either SD or Cloud has complete data
-    combined_percent_data_available = (combined_total_hours_represented / (as.numeric(difftime(end_date, start_date, units = "days")) * 24)) * 100,  # % combined data available
+    combined_percent_data_available = round((combined_total_hours_represented / (as.numeric(difftime(end_date, start_date, units = "days")) * 24)) * 100, 2),  # % combined data available
     
     # Missing data statistics
-    sd_percent_missing_data = 100 - sd_percent_data_available,  # % SD card data missing
-    cloud_percent_missing_data = 100 - cloud_percent_data_available,  # % cloud data missing
-    combined_percent_missing_data = 100 - combined_percent_data_available  # % combined data missing
+    sd_percent_missing_data = round(100 - sd_percent_data_available, 2),  # % SD card data missing
+    cloud_percent_missing_data = round(100 - cloud_percent_data_available, 2),  # % cloud data missing
+    combined_percent_missing_data = round(100 - combined_percent_data_available, 2)  # % combined data missing
   )
 
 
