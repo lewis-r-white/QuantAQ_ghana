@@ -191,6 +191,7 @@ bbox_sf <- st_as_sfc(bounding_box)
 # Filter the roads dataset to include only those within the bounding box
 #roads_filtered <- st_intersection(roads, bbox_sf)
 
+
 #Filter the roads to only bono east
 roads_filtered <- st_intersection(roads, bono_east)
 
@@ -294,7 +295,7 @@ results <- list()
 
 # Load and summarize the data for each pollutant
 for (pollutant in pollutants) {
-  load_pollution_datasets(pollutant)
+  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
   
   colocation_data <- get(paste0(pollutant, "_colocation"))
   community_data <- get(paste0(pollutant, "_community"))
@@ -334,7 +335,7 @@ results <- list()
 
 # Load and summarize the data for each gas
 for (gas in gasses) {
-  load_pollution_datasets(gas) 
+  load_pollution_datasets(gas, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
   
   colocation_data_name <- paste0(gas, "_colocation")
   community_data_name <- paste0(gas, "_community")
@@ -671,7 +672,8 @@ pollutants <- c("pm1", "pm25", "pm10")
 raw_data <- list()
 
 for (pollutant in pollutants) {
-  load_pollution_datasets(pollutant)
+  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
+  
   # Store the raw data
   raw_data[[paste0(pollutant, "_raw")]] <- get(paste0(pollutant, "_raw"))
 }

@@ -131,7 +131,7 @@ pollutants <- c("temp", "rh", "met_temp", "met_rh")
 raw_data <- list()
 
 for (pollutant in pollutants) {
-  load_pollution_datasets(pollutant)
+  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
   # Store the raw data
   raw_data[[paste0(pollutant, "_raw")]] <- get(paste0(pollutant, "_raw"))
 }
