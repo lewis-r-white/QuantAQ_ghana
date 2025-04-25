@@ -3,8 +3,16 @@
 This repository contains scripts, data, and a Shiny dashboard related to the analysis of air quality data collected with QuantAQ devices across Ghana and other locations.
 
 ## Project Structure
-QuantAQ/ ├── analysis/ # Analysis scripts and outputs (e.g., trends, completeness) ├── archive/ # Archived reports, scripts, and older datasets ├── air_pollution_dashboard/ # Shiny dashboard application ├── data/ # Organized raw and processed datasets ├── data_load_and_prep/ # Scripts for data cleaning and preparation ├── plots/ # Figures and visualizations ├── src/ # Core functions and utilities ├── README.md # Project overview (this file) ├── QuantAQ.Rproj # RStudio project file ├── QuantAQ_explore.R # Exploratory analysis script
-
+- `analysis/` – Analysis scripts and outputs (e.g., trends, completeness)
+- `archive/` – Archived reports, scripts, and older datasets
+- `air_pollution_dashboard/` – Shiny dashboard application
+- `data/` – Organized raw and processed datasets
+- `data_load_and_prep/` – Scripts for data cleaning and preparation
+- `plots/` – Figures and visualizations
+- `src/` – Core functions and utilities
+- `README.md` – Project overview (this file)
+- `QuantAQ.Rproj` – RStudio project file
+- `QuantAQ_explore.R` – Exploratory analysis script
 
 ## Repository Components
 
