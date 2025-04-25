@@ -10,9 +10,7 @@ This repository contains scripts, data, and a Shiny dashboard related to the ana
 - `data_load_and_prep/` – Scripts for data cleaning and preparation
 - `plots/` – Figures and visualizations
 - `src/` – Core functions and utilities
-- `README.md` – Project overview (this file)
 - `QuantAQ.Rproj` – RStudio project file
-- `QuantAQ_explore.R` – Exploratory analysis script
 
 ## Repository Components
 
