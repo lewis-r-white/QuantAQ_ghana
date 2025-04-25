@@ -39,7 +39,7 @@ Raw and processed datasets, organized into:
 - `spatial/` — Ghana shapefiles and road network layers
 - `missingness/` — Metadata tracking missing data over time
 
-> ⚡ **Note:** Only summary or cleaned data is stored here for GitHub. Raw proprietary data is stored securely offline.
+> ⚡ **Note:** Data is stored securely offline.
 
 ### 4. Data Load and Preparation
 Scripts for:
