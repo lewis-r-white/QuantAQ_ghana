@@ -1,0 +1,501 @@
+---
+title: "Gas Data Prep"
+output: html_document
+date: "2024-06-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(scipen=999)
+```
+
+This R Markdown document reads in processed SD card, merges it with cloud data, and summarizes findings across the gases. 
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+
+library(here) # file path org
+library(lubridate)# working with dates
+library(tictoc) # timing
+library(DT) # datatables
+library(purrr) # applying functions across df
+library(tidyverse) # data cleaning and plotting
+library(data.table) 
+library(sf) # spatial data 
+library(viridis) # color pallete 
+library(knitr)
+library(modelsummary) # table of regressions
+library(spdep)
+library(gstat)
+library(units) 
+library(gridExtra)
+library(broom)
+library(Metrics) 
+library(kableExtra) # table creation
+library(GGally)
+
+
+# source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
+source(here("src", "load_pollution_datasets.R"))
+
+# source function that aggregates data by time scale of interest (hourly, daily)
+source(here("src", "summarize_pollution_times.R"))
+
+# Source function that creates fleet average vs monitor pollutant reading plot
+source(here("src", "compare_fleet_avg_monitor.R"))
+
+# source function to apply regressions when comparing monitor to fleet average
+source(here("src", "compare_fleet_regression.R"))
+
+# source functions to merge in the SD card data for cases when server data is missing 
+source(here("src", "merge_sd_data.R"))
+source(here("src", "process_multiple_pollutants.R"))
+```
+
+
+```{r}
+## IF DON'T ALREADY HAVE SD CARD DATASET, LOAD IN THE DATA THAT CONTAINS SD CARD INFO. ---- 
+## IF ALREADY HAVE SD CARD DATASET, GO TO NEXT CODE CHUNK  
+
+# List all MOD files with full path
+mod_files <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-00.*\\.csv"
+)
+
+# List all MOD-PM files with full path
+mod_pm_files <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD-PM", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-PM.*\\.csv"
+)
+
+# Function to read, select columns, and add monitor name for MOD files
+read_and_select_mod <- function(file) {
+  # Extract the monitor name from the file name
+  monitor_name <- str_extract(basename(file), "MOD-\\d+")
+  
+  read_csv(file) %>%
+    select(timestamp_iso, co, no, no2, o3) %>%
+    mutate(monitor = monitor_name)
+}
+
+# Read all MOD files and combine them
+MOD_sd_card <- mod_files %>%
+  map_dfr(read_and_select_mod)
+
+
+write_rds(MOD_sd_card, here("data", "gases", "gas_sd_card_20241024.rds"))
+```
+
+
+```{r}
+# LOAD SD CARD DATA
+
+full_sd_card <- read_rds(here("data", "gases", "gas_sd_card_20241024.rds"))
+
+#adjust column names to match cloud
+full_sd_card <- full_sd_card %>%
+  mutate(source = "sd_card")
+
+
+```
+
+
+```{r}
+
+## MERGE THE SD DATA WITH THE SERVER DATA ---- 
+
+# List of pollutants you want to process
+pollutants <- c("co", "no", "no2", "o3")
+
+raw_data <- list()
+
+for (pollutant in pollutants) {
+  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
+  # Store the raw data
+  raw_data[[paste0(pollutant, "_raw")]] <- get(paste0(pollutant, "_raw"))
+}
+
+
+
+
+# Only keep MOD devices (excluding MOD-PM) for gas data
+
+# co
+co_raw_mod <- raw_data$co_raw %>%
+  filter(str_detect(monitor, "^MOD-[^P]"))  # Matches "MOD-" but not "MOD-PM"
+
+# no 
+no_raw_mod <- raw_data$no_raw %>%
+  filter(str_detect(monitor, "^MOD-[^P]"))  # Matches "MOD-" but not "MOD-PM"
+
+# no2
+no2_raw_mod <- raw_data$no2_raw %>%
+  filter(str_detect(monitor, "^MOD-[^P]"))  # Matches "MOD-" but not "MOD-PM"
+
+# o3
+o3_raw_mod <- raw_data$o3_raw %>%
+  filter(str_detect(monitor, "^MOD-[^P]"))  # Matches "MOD-" but not "MOD-PM"
+
+
+# create list of the raw data
+raw_data <- list(co_raw = co_raw_mod, 
+                 no_raw = no_raw_mod,
+                 no2_raw = no2_raw_mod,
+                 o3_raw = o3_raw_mod)
+
+
+
+# Process the pollutants to merge the cloud data with SD card data 
+results <- process_multiple_pollutants(pollutants, raw_data, full_sd_card)
+
+
+co_merged <- results$co$merged %>% distinct(monitor, timestamp, .keep_all = TRUE) # keep only first pairing of monitor and timestamp in case of duplicates 
+
+no_merged <- results$no$merged %>% distinct(monitor, timestamp, .keep_all = TRUE) # keep only first pairing of monitor and timestamp in case of duplicates 
+
+no2_merged <- results$no2$merged %>% distinct(monitor, timestamp, .keep_all = TRUE) # keep only first pairing of monitor and timestamp in case of duplicates 
+
+o3_merged <- results$o3$merged %>% distinct(monitor, timestamp, .keep_all = TRUE) # keep only first pairing of monitor and timestamp in case of duplicates 
+
+
+gas_full <- full_join(co_merged, no_merged) %>%
+  full_join(no2_merged) %>%
+  full_join(o3_merged) %>%
+  select(monitor, timestamp, date, hour, co, no, no2, o3, source) %>%
+  mutate(source = ifelse(is.na(co) & is.na(no) & is.na(no2) & is.na(o3), NA, source)) # change source to NA if no gas has data
+
+# write_rds(gas_full, here("data", "gases", "gas_full_20241024.rds"))
+
+# gas_full <- read_rds(here("data", "gases", "gas_full_20241024.rds"))
+
+colocation_gas <- gas_full %>%
+  filter(timestamp >= as.Date("2023-08-16") & timestamp <= as.Date("2023-09-21"))
+
+# write_rds(colocation_gas, here("data", "gases", "colocation_gases.rds"))
+
+# colocation_gas <- read_rds(here("data", "gases", "colocation_gases.rds"))
+```
+
+
+```{r}
+## COLOCATION DATA TIME SERIES ----
+
+colocation_gas %>%
+  group_by(monitor, date) %>%
+  summarise(
+    mean_co = mean(co, na.rm = TRUE),
+    mean_no2 = mean(no2, na.rm = TRUE),
+    mean_o3 = mean(o3, na.rm = TRUE),
+    mean_no = mean(no, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = starts_with("mean_"), names_to = "gas", values_to = "mean_concentration") %>%
+  mutate(gas = gsub("mean_", "", gas)) %>%
+  ggplot(aes(x = date, y = mean_concentration, color = gas)) +
+  geom_line() +
+  facet_grid(gas ~ monitor, scales = "free_y") +  # Facet by gas and then monitor
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(y = "Mean Concentration", x = "Date", color = "Gas", title = "Daily Average Time Series for Each Gas/Monitor")
+
+
+
+## COMMUNITY DATA TIME SERIES ----
+
+gas_full %>% filter(date > as.Date("2023-10-26")) %>%
+  group_by(monitor, date) %>%
+  summarise(
+    mean_co = mean(co, na.rm = TRUE),
+    mean_no2 = mean(no2, na.rm = TRUE),
+    mean_o3 = mean(o3, na.rm = TRUE),
+    mean_no = mean(no, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = starts_with("mean_"), names_to = "gas", values_to = "mean_concentration") %>%
+  mutate(gas = gsub("mean_", "", gas)) %>%
+  ggplot(aes(x = date, y = mean_concentration, color = gas)) +
+  geom_line() +
+  facet_grid(gas ~ monitor, scales = "free_y") +  # Facet by gas and then monitor
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(y = "Mean Concentration", x = "Date", color = "Gas")
+  
+
+
+### LOOKING AT CORRELATIONS BETWEEN MONITORS -----
+
+# NO SUMMARIZED 
+summarized_no <- summarize_pollution_times(colocation_gas, "no")
+no_hourly <- summarized_no$hourly
+
+# NO NON FILTER 
+# Transform data: Spread 'no' values into wide format by monitor
+no_colocation_wide <- no_hourly %>%
+  spread(key = monitor, value = mean_no)
+
+# Generate pairwise correlation plot
+ggpairs(no_colocation_wide %>% select(`MOD-00397`:`MOD-00401`), 
+        upper = list(continuous = wrap("cor", method = "pearson")), 
+        lower = list(continuous = wrap("smooth", method = "lm", se = TRUE, color = "blue", alpha = 0.5)),
+        diag = list(continuous = "densityDiag")) +  
+  theme_minimal() + 
+  labs(title = "Pairwise Correlation of Hourly NO Values with Regression Slopes")
+
+
+
+# NO WITH FILTER 
+no_hourly_filtered <- no_hourly %>% filter(date > as.Date("2023-08-22"))
+
+# Transform data: Spread 'no' values into wide format by monitor
+no_colocation_wide <- no_hourly_filtered %>%
+  spread(key = monitor, value = mean_no)
+
+ggpairs(no_colocation_wide %>% select(`MOD-00397`:`MOD-00401`), 
+        upper = list(continuous = wrap("cor", method = "pearson")), 
+        lower = list(continuous = wrap("smooth", method = "lm", se = TRUE, color = "blue", alpha = 0.5)),
+        diag = list(continuous = "densityDiag")) +  
+  theme_minimal() + 
+  labs(title = "Pairwise Correlation of Hourly NO Values", 
+       subtitle = "Filtered to after Aug 21 to remove outliers") 
+  
+
+
+
+# NO2 SUMMARIZED 
+summarized_no2 <- summarize_pollution_times(colocation_gas, "no2")
+no2_hourly <- summarized_no2$hourly
+
+# NO2 PLOT
+# Transform data: Spread 'no2' values into wide format by monitor
+no2_colocation_wide <- no2_hourly %>%
+  spread(key = monitor, value = mean_no2)
+
+# Generate pairwise correlation plot
+ggpairs(no2_colocation_wide %>% select(`MOD-00397`:`MOD-00400`), 
+        upper = list(continuous = wrap("cor", method = "pearson")), # Show correlation
+        lower = list(continuous = wrap("smooth", method = "lm", se = TRUE, color = "blue", alpha = 0.5)),
+        diag = list(continuous = "densityDiag")) +  
+  theme_minimal() + 
+  labs(title = "Pairwise Correlation of Hourly NO2 Values")
+
+
+
+
+# CO SUMMARIZED 
+summarized_co <- summarize_pollution_times(colocation_gas, "co")
+co_hourly <- summarized_co$hourly
+
+# CO PLOT
+# Transform data: Spread 'co' values into wide format by monitor
+co_colocation_wide <- co_hourly %>%
+  spread(key = monitor, value = mean_co)
+
+# Generate pairwise correlation plot
+ggpairs(co_colocation_wide %>% select(`MOD-00397`:`MOD-00401`), 
+        upper = list(continuous = wrap("cor", method = "pearson")), # Show correlation
+        lower = list(continuous = wrap("smooth", method = "lm", se = TRUE, color = "blue", alpha = 0.5)),
+        diag = list(continuous = "densityDiag")) +  
+  theme_minimal() + 
+  labs(title = "Pairwise Correlation of Hourly CO Values")
+
+
+
+# O3 SUMMARIZED 
+summarized_o3 <- summarize_pollution_times(colocation_gas, "o3")
+o3_hourly <- summarized_o3$hourly
+
+# O3 PLOT
+# Transform data: Spread 'o3' values into wide format by monitor
+o3_colocation_wide <- o3_hourly %>%
+  spread(key = monitor, value = mean_o3)
+
+# Generate pairwise correlation plot
+ggpairs(o3_colocation_wide %>% select(`MOD-00397`:`MOD-00401`), 
+        upper = list(continuous = wrap("cor", method = "pearson")), # Show correlation
+        lower = list(continuous = wrap("smooth", method = "lm", se = TRUE, color = "blue", alpha = 0.5)),
+        diag = list(continuous = "densityDiag")) +  
+  theme_minimal() + 
+  labs(title = "Pairwise Correlation of Hourly O3 Values")
+
+
+
+### REGRESSION WITH SLOPE PLOTS ----
+library(ggpubr)
+
+# Select only monitor columns
+monitor_cols <- o3_colocation_wide %>% select(`MOD-00397`:`MOD-00401`)
+
+# Get all unique pairs of monitor columns (including self-pairs for a full 5x5 grid)
+monitor_pairs <- expand.grid(monitor_x = names(monitor_cols), monitor_y = names(monitor_cols), 
+                             stringsAsFactors = FALSE)
+
+# Function to generate scatterplot with regression line and annotation
+plot_regression <- function(x, y) {
+  df <- no_colocation_wide %>% select(all_of(c(x, y))) %>% drop_na()
+  
+  # Compute correlation and regression slope
+  cor_val <- round(cor(df[[x]], df[[y]], use = "complete.obs"), 3)
+  model <- lm(df[[y]] ~ df[[x]], data = df)
+  slope_val <- round(coef(model)[2], 3)
+  
+  ggplot(df, aes(x = .data[[x]], y = .data[[y]])) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm", color = "blue") +
+    labs(title = paste(x, "vs", y),
+         subtitle = paste("Corr:", cor_val, "\nSlope:", slope_val),
+         x = x, y = y) +
+    theme_minimal()
+}
+
+# Generate a list of plots for each pair of monitors
+plot_list <- map2(monitor_pairs$monitor_x, monitor_pairs$monitor_y, plot_regression)
+
+# Arrange the plots into a grid using ggarrange
+ggarrange(plotlist = plot_list, ncol = 5, nrow = 5)
+```
+
+
+
+## caluclating regression for colocation correction 
+
+### prep data
+```{r calc regression for colocation correction data, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Filter reference monitor data
+reference_data <- colocation_gas %>%
+  filter(monitor == "MOD-00397") %>%
+  select(timestamp, reference_co = co, reference_no = no, reference_no2 = no2, reference_o3 = o3)
+
+# Merge reference data with the main dataset
+colocation_gas_with_reference <- colocation_gas %>%
+  left_join(reference_data, by = "timestamp")
+```
+
+
+```{r}
+# Initialize an empty list to store results
+results_list <- list()
+
+# List of gases and their references
+gases <- c("co", "no", "no2", "o3")
+reference_gases <- c("reference_co", "reference_no", "reference_no2", "reference_o3")
+
+# Loop over each monitor
+for (monitor in unique(colocation_gas_with_reference$monitor)) {
+  # Filter data for the current monitor
+  monitor_data <- colocation_gas_with_reference %>%
+    filter(monitor == !!monitor)
+  
+  # Loop over each gas and its reference
+  for (i in seq_along(gases)) {
+    gas <- gases[i]
+    reference_gas <- reference_gases[i]
+    
+    # Remove rows with NA in gas or reference gas
+    valid_data <- monitor_data %>%
+      filter(!is.na(.data[[gas]]), !is.na(.data[[reference_gas]]))
+    
+    if (nrow(valid_data) < 2) {
+      # If insufficient data, save NA for this gas and monitor
+      results_list <- append(results_list, list(
+        tibble(
+          monitor = monitor,
+          gas = gas,
+          slope = NA,
+          intercept = NA,
+          R2 = NA
+        )
+      ))
+    } else {
+      # Perform regression
+      model <- lm(as.formula(paste(gas, "~", reference_gas)), data = valid_data)
+      model_summary <- summary(model)
+      
+      # Save results
+      results_list <- append(results_list, list(
+        tibble(
+          monitor = monitor,
+          gas = gas,
+          slope = coef(model)[[2]],
+          intercept = coef(model)[[1]],
+          R2 = model_summary$r.squared
+        )
+      ))
+    }
+  }
+}
+
+# Combine all results into a single data frame
+regression_results <- bind_rows(results_list)
+
+regression_results_reformatted <- regression_results %>%
+  select(monitor, gas, slope, intercept) %>%
+  pivot_longer(cols = c(slope, intercept), names_to = "parameter", values_to = "value") %>%
+  mutate(parameter = paste(gas, parameter,  sep = "_")) %>%
+  select(-gas) %>%
+  pivot_wider(names_from = parameter, values_from = value)
+
+```
+
+```{r}
+community_gas <- gas_full %>%
+  filter(timestamp >= as.Date("2023-09-26"))
+
+
+# Join the reshaped regression results with the community data
+corrected_community_gas <- community_gas %>%
+  left_join(regression_results_reformatted, by = "monitor") %>%
+  mutate(
+    corrected_co = (co - co_intercept) / co_slope,
+    corrected_no = (no - no_intercept) / no_slope,
+    corrected_no2 = (no2 - no2_intercept) / no2_slope,
+    corrected_o3 = (o3 - o3_intercept) / o3_slope
+  ) %>%
+  select(monitor, timestamp, date, hour, corrected_co, corrected_no, corrected_no2, corrected_o3, source) %>%
+  rename(co = corrected_co,
+         no = corrected_no,
+         no2 = corrected_no2,
+         o3 = corrected_o3)
+
+write_rds(corrected_community_gas, here("data", "gases", "corrected_community_gas_20241024.rds"))
+
+
+## Get corrected data for each of the gases 
+co_corrected <- corrected_community_gas %>%
+  select(-c(no, no2, o3))
+
+no_corrected <- corrected_community_gas %>%
+  select(-c(co, no2, o3))
+
+no2_corrected <- corrected_community_gas %>%
+  select(-c(co, no, o3))
+
+o3_corrected <- corrected_community_gas %>%
+  select(-c(co, no, no2))
+
+## create hourly and daily summaries of the gases 
+summarized_co <- summarize_pollution_times(co_corrected, "co")
+summarized_no <- summarize_pollution_times(no_corrected, "no")
+summarized_no2 <- summarize_pollution_times(no2_corrected, "no2")
+summarized_o3 <- summarize_pollution_times(o3_corrected, "o3")
+
+# save the hourly summaries
+co_community_hourly <- summarized_co$hourly
+no_community_hourly <- summarized_no$hourly
+no2_community_hourly <- summarized_no2$hourly
+o3_community_hourly <- summarized_o3$hourly
+
+# save the daily summaries 
+co_community_daily <- summarized_co$daily
+no_community_daily <- summarized_no$daily
+no2_community_daily <- summarized_no2$daily
+o3_community_daily <- summarized_o3$daily
+```
+
+

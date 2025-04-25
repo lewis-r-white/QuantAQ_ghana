@@ -1,0 +1,350 @@
+---
+title: "Gas vs PM Completeness for MOD Devices"
+output: 
+  html_document:
+    toc: true
+    theme: united
+date: "2024-06-13"
+---
+
+
+Integrates air quality data from multiple sources (PM and gas sensors) for MOD devices, processes it to ensure consistency across timestamps, and calculates pollutant data availability (e.g., PM1, PM25, CO, NO, NO2, O3) over time at weekly and monthly intervals.
+
+Plots availability for each monitor and each pollutant. 
+  
+  
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+library(here) 
+library(lubridate) 
+library(purrr)
+library(tidyverse)
+library(data.table)
+library(knitr)
+library(units) 
+library(gridExtra)
+library(broom)
+library(Metrics)
+library(kableExtra)
+```
+
+
+
+```{r pm1 data, echo=FALSE, message=FALSE, warning=FALSE}
+# LOAD POLLUTION DATA ----
+
+# Load finalized PM and gas data
+pm25 <- read_rds(here("data", "pm", "final", "pm25corrected_20231024-20240816.rds"))
+pm1  <- read_rds(here("data", "pm", "final", "pm1corrected_20231024-20240816.rds"))
+gas  <- read_rds(here("data", "gas", "final", "corrected_community_gas_20230926-20240816.rds"))
+
+
+```
+
+
+```{r}
+# Filter to MOD devices only
+mod_filter <- function(df) {
+  df %>%
+    filter(str_detect(monitor, "^MOD-\\d+$")) %>%
+    distinct(timestamp, monitor, .keep_all = TRUE)
+}
+
+pm25_mods <- mod_filter(pm25) %>% select(monitor, timestamp, pm25)
+
+pm1_mods  <- mod_filter(pm1) %>% select(monitor, timestamp, pm1)
+
+gas_mods  <- mod_filter(gas)  %>% select(monitor, timestamp, co, no, no2, o3)
+
+
+
+# Merge PM and gas together
+cloud_mod_full <- reduce(list(pm1_mods, pm25_mods, gas_mods), full_join, by = c("timestamp", "monitor")) %>%
+  mutate(
+    date = date(timestamp),
+    hour = hour(timestamp),
+    week = floor_date(timestamp, "week"),
+    month = floor_date(timestamp, "month")
+  ) %>%
+  select(monitor, timestamp, date, month, week, hour, pm1:o3)
+```
+
+
+```{r}
+
+total_counts_df <- cloud_mod_full %>%
+  group_by(month) %>%
+  count()
+
+
+na_counts_df <- cloud_mod_full %>%
+  group_by(month) %>%
+  summarize(
+    pm1_na = sum(is.na(pm1)),
+    pm25_na = sum(is.na(pm25)),
+    co_na = sum(is.na(co)),
+    no_na = sum(is.na(no)),
+    no2_na = sum(is.na(no2)),
+    o3_na = sum(is.na(o3))
+  )
+
+availability_table <- na_counts_df %>%
+  left_join(total_counts_df, by = "month") %>%
+  mutate(
+    pm1_availability = (n - pm1_na) / n,
+    pm25_availability = (n - pm25_na) / n,
+    co_availability = (n - co_na) / n,
+    no_availability = (n - no_na) / n,
+    no2_availability = (n - no2_na) / n,
+    o3_availability = (n - o3_na) / n
+  ) %>%
+  select(month, pm25_availability, co_availability, no_availability, no2_availability, o3_availability) %>%
+  rename(pm_availability = pm25_availability)
+
+
+
+ availability_table_long <- availability_table %>%
+  pivot_longer(cols = -month, names_to = "pollutant", values_to = "availability") 
+
+# Create the line plot
+ggplot(availability_table_long, aes(x = month, y = availability, color = pollutant, group = pollutant)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +  # Optional: adds points at each month
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) + # Y-axis as percentage
+  labs(title = "Data Availability by Pollutant Over Time",
+       x = "Month",
+       y = "Data Availability (%)",
+       color = "Pollutant") +
+  theme_minimal()
+```
+
+
+
+```{r}
+
+total_counts_df <- cloud_mod_full %>%
+  group_by(week) %>%
+  count()
+
+
+na_counts_df <- cloud_mod_full %>%
+  group_by(week) %>%
+  summarize(
+    pm1_na = sum(is.na(pm1)),
+    pm25_na = sum(is.na(pm25)),
+    co_na = sum(is.na(co)),
+    no_na = sum(is.na(no)),
+    no2_na = sum(is.na(no2)),
+    o3_na = sum(is.na(o3))
+  )
+
+availability_table <- na_counts_df %>%
+  left_join(total_counts_df, by = "week") %>%
+  mutate(
+    pm1_availability = (n - pm1_na) / n,
+    pm25_availability = (n - pm25_na) / n,
+    co_availability = (n - co_na) / n,
+    no_availability = (n - no_na) / n,
+    no2_availability = (n - no2_na) / n,
+    o3_availability = (n - o3_na) / n
+  ) %>%
+  select(week, pm25_availability, co_availability, no_availability, no2_availability, o3_availability) %>%
+  rename(pm_availability = pm25_availability)
+
+
+
+ availability_table_long <- availability_table %>%
+  pivot_longer(cols = -week, names_to = "pollutant", values_to = "availability") 
+
+# Create the line plot
+ggplot(availability_table_long, aes(x = week, y = availability, color = pollutant, group = pollutant)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +  # Optional: adds points at each week
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) + # Y-axis as percentage
+  labs(title = "Data Availability by Pollutant Over Time",
+       x = "Month",
+       y = "Data Availability (%)",
+       color = "Pollutant") +
+  theme_minimal()
+```
+
+
+
+```{r}
+# Create total counts per month
+total_counts_df <- cloud_mod_full %>%
+  group_by(monitor, month) %>%
+  count()
+
+# Calculate NA counts per month
+na_counts_df <- cloud_mod_full %>%
+  group_by(monitor, month) %>%
+  summarize(
+    pm1_na = sum(is.na(pm1)),
+    pm25_na = sum(is.na(pm25)),
+    co_na = sum(is.na(co)),
+    no_na = sum(is.na(no)),
+    no2_na = sum(is.na(no2)),
+    o3_na = sum(is.na(o3))
+  )
+
+# Calculate availability percentages for each pollutant
+availability_table <- na_counts_df %>%
+  left_join(total_counts_df, by = c("monitor", "month")) %>%
+  mutate(
+    pm1_availability = (n - pm1_na) / n,
+    pm25_availability = (n - pm25_na) / n,
+    co_availability = (n - co_na) / n,
+    no_availability = (n - no_na) / n,
+    no2_availability = (n - no2_na) / n,
+    o3_availability = (n - o3_na) / n
+  ) %>%
+  select(month, pm25_availability, co_availability, no_availability, no2_availability, o3_availability) %>%
+  rename(pm_availability = pm25_availability)
+
+# Reshape data for plotting
+availability_table_long <- availability_table %>%
+  pivot_longer(cols = c("pm_availability", 
+                        "co_availability", 
+                        "no_availability",
+                        "no2_availability",
+                        "o3_availability"), names_to = "pollutant", values_to = "availability") 
+
+# Create the line plot by month
+ggplot(availability_table_long, aes(x = month, y = availability, color = pollutant, group = pollutant)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +  # Optional: adds points at each month
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) + # Y-axis as percentage
+  labs(title = "Data Availability by Pollutant Over Time (monthly)",
+       x = "Week",
+       y = "Data Availability (%)",
+       color = "Pollutant") +
+  theme_minimal() +
+  facet_wrap(~ monitor, scales = "free_y")
+```
+
+
+
+
+## Including MOD-00077 just looking at Sept 2024 onwards
+```{r}
+all_mod_devices <- read_csv(here("data", "all_measurements", "cloud", "all_mod_devices_20240901-20241118.csv"))
+
+# Prepare data by including monitor and week aggregation
+all_mod_devices_clean <- all_mod_devices %>%
+  select(monitor, timestamp, date, hour, co, no, no2, o3, pm1, pm10, pm25) %>%
+  mutate(week = floor_date(timestamp, "week"),
+         month = floor_date(timestamp, "month"))
+
+# Create total counts per week, grouped by monitor
+total_counts_df <- all_mod_devices_clean %>%
+  group_by(monitor, week) %>%
+  count()
+
+# Calculate NA counts per week, grouped by monitor
+na_counts_df <- all_mod_devices_clean %>%
+  group_by(monitor, week) %>%
+  summarize(
+    pm1_na = sum(is.na(pm1)),
+    pm25_na = sum(is.na(pm25)),
+    co_na = sum(is.na(co)),
+    no_na = sum(is.na(no)),
+    no2_na = sum(is.na(no2)),
+    o3_na = sum(is.na(o3))
+  )
+
+# Calculate availability percentages for each pollutant, grouped by monitor
+availability_table <- na_counts_df %>%
+  left_join(total_counts_df, by = c("monitor", "week")) %>%
+  mutate(
+    pm1_availability = (n - pm1_na) / n,
+    pm25_availability = (n - pm25_na) / n,
+    co_availability = (n - co_na) / n,
+    no_availability = (n - no_na) / n,
+    no2_availability = (n - no2_na) / n,
+    o3_availability = (n - o3_na) / n
+  ) %>%
+  rename(pm_availability = pm25_availability,
+         co_no2_o3_availability = co_availability) %>%
+  select(week, pm_availability, co_no2_o3_availability, no_availability)
+
+# Reshape data for plotting
+availability_table_long <- availability_table %>%
+  pivot_longer(cols = -c(monitor, week), names_to = "pollutant", values_to = "availability") 
+
+# Create the line plot by week, with facet_wrap by monitor
+ggplot(availability_table_long, aes(x = week, y = availability, color = pollutant, group = pollutant)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +  # Optional: adds points at each week
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) + # Y-axis as percentage
+  labs(title = "Data Availability by Pollutant Over Time (Weekly)",
+       x = "Week",
+       y = "Data Availability (%)",
+       color = "Pollutant") +
+  theme_minimal() +
+  facet_wrap(~ monitor, scales = "free_y")
+
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+# Create total counts per week
+total_counts_df <- cloud_mod_full %>%
+  group_by(monitor, week) %>%
+  count()
+
+# Calculate NA counts per week
+na_counts_df <- cloud_mod_full %>%
+  group_by(monitor, week) %>%
+  summarize(
+    pm1_na = sum(is.na(pm1)),
+    pm25_na = sum(is.na(pm25)),
+    co_na = sum(is.na(co)),
+    no_na = sum(is.na(no)),
+    no2_na = sum(is.na(no2)),
+    o3_na = sum(is.na(o3))
+  )
+
+# Calculate availability percentages for each pollutant
+availability_table <- na_counts_df %>%
+  left_join(total_counts_df, by = c("monitor", "week")) %>%
+  mutate(
+    pm1_availability = (n - pm1_na) / n,
+    pm25_availability = (n - pm25_na) / n,
+    co_availability = (n - co_na) / n,
+    no_availability = (n - no_na) / n,
+    no2_availability = (n - no2_na) / n,
+    o3_availability = (n - o3_na) / n
+  ) %>%
+  select(week, pm25_availability, co_availability, no_availability, no2_availability, o3_availability) %>%
+  rename(pm_availability = pm25_availability)
+
+# Reshape data for plotting
+availability_table_long <- availability_table %>%
+  pivot_longer(cols = c("pm_availability", 
+                        "co_availability", 
+                        "no_availability",
+                        "no2_availability",
+                        "o3_availability"), names_to = "pollutant", values_to = "availability") 
+
+# Create the line plot by week
+ggplot(availability_table_long, aes(x = week, y = availability, color = pollutant, group = pollutant)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +  # Optional: adds points at each week
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) + # Y-axis as percentage
+  labs(title = "Data Availability by Pollutant Over Time (Weekly)",
+       x = "Week",
+       y = "Data Availability (%)",
+       color = "Pollutant") +
+  theme_minimal() +
+  facet_wrap(~ monitor, scales = "free_y")
+```
+

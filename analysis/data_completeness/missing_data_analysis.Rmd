@@ -1,0 +1,674 @@
+---
+title: "Missing Data Analysis"
+output: 
+  html_document:
+    toc: true
+    theme: united
+date: "2025-02-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+library(here) 
+library(lubridate) 
+library(tictoc)
+library(DT)
+library(purrr)
+library(tidyverse)
+library(data.table)
+library(sf)
+library(viridis)
+library(knitr)
+library(modelsummary)
+library(spdep)
+library(gstat)
+library(units) 
+library(gridExtra)
+
+library(broom)
+library(Metrics)
+library(kableExtra)
+
+library(forcats)
+library(plotly)
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Source in functions
+
+# source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
+source(here("src", "load_pollution_datasets.R"))
+
+# source function that aggregates data by time scale of interest (hourly, daily)
+source(here("src", "summarize_pollution_times.R"))
+
+# Source function that creates fleet average vs monitor pollutant reading plot
+source(here("src", "compare_fleet_avg_monitor.R"))
+
+# Source function that creates heatmap of pollutant readings
+source(here("src", "generate_heatmap.R"))
+
+# Source function to make map of pollution values at each monitor location
+source(here("src", "generate_spatial_pollution_map.R"))
+
+# source function to calculate moran i 
+source(here("src", "calculate_moran_i.R"))
+
+# source function to prepare data for road regression analysis and plotting
+source(here("src", "prep_monitor_road_data.R"))
+
+# source function to plot map of pollutant levels by location with roads 
+source(here("src", "generate_spatial_pollution_road_map.R"))
+
+# source function to run regression analysis on pollutant / distance to road
+source(here("src", "regress_pollutant_road.R"))
+
+# source function to apply regressions when comparing monitor to fleet average
+source(here("src", "compare_fleet_regression.R"))
+
+# source functions to merge in the SD card data for cases when server data is missing 
+source(here("src", "merge_sd_data.R"))
+source(here("src", "process_multiple_pollutants.R"))
+
+#source functions to create plot that compares individual monitor to golden monitor
+source(here("src", "compare_gas_to_reference_functions.R"))
+
+#source functions to create plot that compares individual monitor to golden monitor
+source(here("src", "calc_gas_regressions.R"))
+```
+
+
+```{r location data, echo=FALSE, message=FALSE, warning=FALSE}
+#LOAD LOCATION DATA ----
+monitor_community_info <- read_csv(here("data", "monitor_community_info.csv"))
+
+# create spatial feature dataset of monitor points
+monitor_points <- st_as_sf(monitor_community_info, coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+
+# LOAD IN THE COUNTRY AND REGION MAP DATA ----
+
+country <- st_read(here("data", "spatial", "ghana_boundaries_shp", "gha_admbnda_adm0_gss_20210308.shp"), quiet = TRUE)
+
+regions <- st_read(here("data",  "spatial", "ghana_boundaries_shp",  "gha_admbnda_adm1_gss_20210308.shp"), quiet = TRUE) %>%
+  rename(region = ADM1_EN)
+
+bono_east <- regions %>% filter(region == "Bono East")
+
+# just the lat/lon for kintampo
+kintampo_sf <- st_as_sf(data.frame(
+  location = "Kintampo",
+  geo_lon = -1.7296,
+  geo_lat = 8.0593
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+
+# LOAD IN THE ROADS DATA ----
+
+# Load roads data and set CRS (assuming it's EPSG:4326)
+roads <- st_read(here("data", "spatial", "ghana_roads_shp",  "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
+st_crs(roads) <- 4326
+
+
+# Define the bounding box
+bounding_box <- st_bbox(c(xmin = -2.2, ymin = 7.6, xmax = -1.3, ymax = 8.8), crs = st_crs(4326))
+
+# Create a bounding box as an sf object
+bbox_sf <- st_as_sfc(bounding_box)
+
+# Filter the roads dataset to include only those within the bounding box
+roads_filtered <- st_intersection(roads, bbox_sf)
+```
+
+
+```{r pollution data, echo=FALSE, message=FALSE, warning=FALSE}
+## CLOUD ONLY DATA
+
+# List of pollutants
+pollutants <- c("pm25")
+
+file_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
+
+# Load all cloud data in a structured way
+raw_data <- lapply(pollutants, function(pollutant) {
+  load_pollution_datasets(pollutant, file_path = file_path, file_type = "csv")
+})
+
+# Name the list by pollutant
+names(raw_data) <- pollutants
+
+# include necessary vars 
+pm25_cloud <- raw_data$pm25$raw_cloud %>% 
+  select(timestamp, monitor, pm25)
+
+
+
+## MERGED DATA 
+pm25_cloud_sd_merged <- read_rds(here("data", "pm", "final", "pm25corrected_20231024-20240816.rds"))
+
+```
+
+# cloud missingness 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# Create monitor missingness summary
+
+monitor_missingness <- pm25_cloud %>% 
+  group_by(monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm25)) * 100) %>%
+  mutate(monitor = fct_reorder(monitor, -missing_rate)) %>%
+  mutate(percent_complete = 100 - missing_rate)
+
+# Join with monitor points for spatial data
+missing_monitor_location <- left_join(monitor_missingness, monitor_points) %>%
+  select(monitor, description, percent_complete, geometry)
+
+# Static ggplot
+p <- ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "lightblue"), color = "black", alpha = 0.5) +
+  
+  # Add monitor points with transparency and hover information
+  geom_sf(data = missing_monitor_location, 
+          aes(geometry = geometry, color = percent_complete, 
+              text = paste0("Monitor: ", monitor, " -- ", description, "<br>",
+                            "Recovery Rate: ", round(percent_complete, 1), "%<br>")), 
+          alpha = 0.7, size = 5) +
+  
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Cloud Data Recovery Rate",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#eb4c2d", high = "#0540a1", name = "Data Recovery Rate (%)")
+
+# Convert to interactive plot
+ggplotly(p, tooltip = "text")
+
+```
+
+## cloud sd merged missingness
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# Create monitor missingness summary
+monitor_missingness <- pm25_cloud_sd_merged %>% 
+  group_by(monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm25)) * 100) %>%
+  mutate(monitor = fct_reorder(monitor, -missing_rate)) %>%
+  mutate(percent_complete = 100 - missing_rate)
+
+# Join with monitor points for spatial data
+missing_monitor_location <- left_join(monitor_missingness, monitor_points) %>%
+  select(monitor, description, percent_complete, geometry)
+
+# Static ggplot
+p <- ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "lightblue"), color = "black", alpha = 0.5) +
+  
+  # Add monitor points with transparency and hover information
+  geom_sf(data = missing_monitor_location, 
+          aes(geometry = geometry, color = percent_complete, 
+              text = paste0("Monitor: ", monitor, " -- ", description, "<br>",
+                            "Recovery Rate: ", round(percent_complete, 1), "%<br>")), 
+          alpha = 0.7, size = 5) +
+  
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Total Data Recovery Rate (Cloud + SD)",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#eb4c2d", high = "#0540a1", name = "Data Recovery Rate (%)")
+
+# Convert to interactive plot
+ggplotly(p, tooltip = "text")
+
+```
+
+## Harmattan vs Non-Harmattan Specific Analysis
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+harmattan_start <- as.Date("2023-12-01")
+harmattan_end <- as.Date("2024-03-01")
+```
+
+### harmattan spatial plot
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+pm_25_full_harmattan <- pm25_cloud_sd_merged %>% 
+  filter(timestamp >= harmattan_start,
+         timestamp <= harmattan_end)
+
+monitor_missingness <- pm_25_full_harmattan %>% 
+  group_by(monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm25)) * 100) %>%
+  mutate(monitor = fct_reorder(monitor, -missing_rate)) %>%
+  mutate(percent_complete = 100 - missing_rate)
+
+# Join with monitor points for spatial data
+missing_monitor_location <- left_join(monitor_missingness, monitor_points) %>%
+  select(monitor, description, percent_complete, geometry)
+
+# Static ggplot
+p <- ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "lightblue"), color = "black", alpha = 0.5) +
+  
+  # Add monitor points with transparency and hover information
+  geom_sf(data = missing_monitor_location, 
+          aes(geometry = geometry, color = percent_complete, 
+              text = paste0("Monitor: ", monitor, " -- ", description, "<br>",
+                            "Recovery Rate: ", round(percent_complete, 1), "%<br>")), 
+          alpha = 0.7, size = 5) +
+  
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Total Data Recovery Rate During Harmattan (Cloud + SD)",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#eb4c2d", high = "#0540a1", name = "Data Recovery Rate (%)")
+
+# Convert to interactive plot
+ggplotly(p, tooltip = "text")
+```
+
+
+### Non-harmattan spatial plot
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+### NON-HARMATTAN ----
+
+pm_25_full_non_harmattan <- pm25_cloud_sd_merged %>% 
+  filter(timestamp < harmattan_start | timestamp > harmattan_end)
+
+monitor_missingness <- pm_25_full_non_harmattan %>% 
+  group_by(monitor) %>% 
+  summarise(missing_rate = mean(is.na(pm25)) * 100) %>%
+  mutate(monitor = fct_reorder(monitor, -missing_rate)) %>%
+  mutate(percent_complete = 100 - missing_rate)
+
+# Join with monitor points for spatial data
+missing_monitor_location <- left_join(monitor_missingness, monitor_points) %>%
+  select(monitor, description, percent_complete, geometry)
+
+# Static ggplot
+p <- ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "lightblue"), color = "black", alpha = 0.5) +
+  
+  # Add monitor points with transparency and hover information
+  geom_sf(data = missing_monitor_location, 
+          aes(geometry = geometry, color = percent_complete, 
+              text = paste0("Monitor: ", monitor, " -- ", description, "<br>",
+                            "Recovery Rate: ", round(percent_complete, 1), "%<br>")), 
+          alpha = 0.7, size = 5) +
+  
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Total Data Recovery Rate Outside of Harmattan (Cloud + SD)",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#eb4c2d", high = "#0540a1", name = "Data Recovery Rate (%)")
+
+# Convert to interactive plot
+ggplotly(p, tooltip = "text")
+```
+
+
+
+
+```{r harmattan barplot,include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+monitor_obs_count_type_harmattan <- pm_25_full_harmattan %>%
+  group_by(monitor, source) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  group_by(monitor) %>%
+  mutate(full_count = sum(count),
+         percentage = count / sum(count) * 100) %>%
+  ungroup() %>%
+  filter(!is.na(source)) %>%
+  mutate(source = factor(source, levels = c("sd_card", "cloud"))) %>%
+  
+  left_join(monitor_points)
+
+
+
+
+monitor_order_harmattan <- monitor_obs_count_type_harmattan %>%
+  filter(source %in% c("cloud", "sd_card")) %>%
+  group_by(description) %>%
+  summarise(total = sum(percentage)) %>%
+  arrange(desc(total)) %>%
+  pull(description)
+
+# Data preparation
+monitor_obs_count_type_harmattan <- monitor_obs_count_type_harmattan %>%
+  mutate(description = factor(description, levels = monitor_order_harmattan)) %>%
+  group_by(description) %>%
+  mutate(total_percentage = sum(percentage)) %>%
+  ungroup()
+  #mutate(description = fct_reorder(description, total_percentage, .desc = TRUE))
+
+# Plotting
+ggplot(monitor_obs_count_type_harmattan, aes(x = description, y = percentage, fill = source)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Percent of Data Recorded By Monitor During Harmattan",
+    x = "Monitor",
+    y = "Percentage of Data Recorded",
+    fill = "Data Source"
+  ) +  # Custom legend title
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    axis.title.x = element_text(size = 14),  # Increase x-axis title size
+    axis.title.y = element_text(size = 14),  # Increase y-axis title size
+    legend.text = element_text(size = 12),   # Increase legend text size
+    legend.title = element_text(size = 14)   # Increase legend title size
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, 100)) +
+  scale_fill_manual(
+    values = c("cloud" = "#2599db", "sd_card" = "#b54033"),
+    labels = c("cloud" = "Cloud", "sd_card" = "SD Card")
+  )
+
+
+```
+
+
+```{r non harmattan barplot, include = FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+monitor_obs_count_type_non_harmattan <- pm_25_full_non_harmattan %>%
+  group_by(monitor, source) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  group_by(monitor) %>%
+  mutate(full_count = sum(count),
+         percentage = count / sum(count) * 100) %>%
+  ungroup() %>%
+  filter(!is.na(source)) %>%
+  mutate(source = factor(source, levels = c("sd_card", "cloud"))) %>%
+  
+  left_join(monitor_points)
+
+# order of monitor completeness non-harmattan
+monitor_order_non_harmattan <- monitor_obs_count_type_non_harmattan %>%
+  filter(source %in% c("cloud", "sd_card")) %>%
+  group_by(description) %>%
+  summarise(total = sum(percentage)) %>%
+  arrange(desc(total)) %>%
+  pull(description)
+
+# Data preparation
+monitor_obs_count_type_non_harmattan <- monitor_obs_count_type_non_harmattan %>%
+  mutate(description = factor(description, levels = monitor_order_harmattan)) %>% # want to use order of completed in HARMATTAN for easy comparison to above plot
+  group_by(description) %>%
+  mutate(total_percentage = sum(percentage)) %>%
+  ungroup() 
+
+# Plotting
+ggplot(monitor_obs_count_type_non_harmattan, aes(x = description, y = percentage, fill = source)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Percent of Data Recorded By Monitor Outside of Harmattan",
+    x = "Monitor",
+    y = "Percentage of Data Recorded",
+    fill = "Data Source"
+  ) +  # Custom legend title
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    axis.title.x = element_text(size = 14),  # Increase x-axis title size
+    axis.title.y = element_text(size = 14),  # Increase y-axis title size
+    legend.text = element_text(size = 12),   # Increase legend text size
+    legend.title = element_text(size = 14)   # Increase legend title size
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, 100)) +
+  scale_fill_manual(
+    values = c("cloud" = "#2599db", "sd_card" = "#b54033"),
+    labels = c("cloud" = "Cloud", "sd_card" = "SD Card")
+  )
+```
+
+
+
+```{r non harmattan with ratio above, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+## non-harmattan with ratio above
+
+ratio_data <- monitor_obs_count_type_harmattan %>%
+  select(monitor, description, total_percentage) %>%
+  distinct() %>%
+  rename(harmattan_coverage = total_percentage) %>%
+  
+  inner_join(monitor_obs_count_type_non_harmattan %>%
+  select(monitor, description, total_percentage) %>%
+  distinct() %>%
+  rename(non_harmattan_coverage = total_percentage)) %>%
+  
+  mutate(harmattan_to_non_ratio = harmattan_coverage/non_harmattan_coverage) %>%
+  select(monitor, description, harmattan_to_non_ratio)
+
+barplot_with_ratio_data <- left_join(monitor_obs_count_type_non_harmattan, ratio_data)
+
+
+
+
+# Create a distinct dataset for labeling (one row per description)
+label_data <- barplot_with_ratio_data %>%
+  distinct(description, harmattan_to_non_ratio, total_percentage)
+
+ggplot(barplot_with_ratio_data, aes(x = description, y = percentage, fill = source)) +
+  geom_bar(stat = "identity") +
+  # Add the ratio as text above each stacked bar without inheriting global aesthetics
+  geom_text(
+    data = label_data,
+    mapping = aes(
+      x = description, 
+      y = total_percentage, 
+      label = round(harmattan_to_non_ratio, 2)
+    ),
+    inherit.aes = FALSE,
+    vjust = -0.5  # adjust as needed for spacing above the bar
+  ) +
+  labs(
+    title = "Percent of Data Recorded By Monitor Outside of Harmattan",
+    x = "Monitor",
+    y = "Percentage of Data Recorded",
+    fill = "Data Source"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14)
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, 100)) +
+  scale_fill_manual(
+    values = c("cloud" = "#2599db", "sd_card" = "#b54033"),
+    labels = c("cloud" = "Cloud", "sd_card" = "SD Card")
+  )
+
+```
+
+
+## Plotting ratio of harmattan completeness to non-harmattan
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ratio_location <- left_join(ratio_data, monitor_points) %>%
+  select(monitor, description, harmattan_to_non_ratio, geometry)
+
+# Static ggplot
+p <- ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#ded9d9", "lightblue"), color = "black", alpha = 0.5) +
+  
+  # Add monitor points with transparency and hover information
+  geom_sf(data = ratio_location, 
+          aes(geometry = geometry, color = harmattan_to_non_ratio, 
+              text = paste0("Monitor: ", monitor, " -- ", description, "<br>",
+                            "Harmattan to non-harmattan \ncompleteness ratio: ", round(harmattan_to_non_ratio, 2), "<br>")), 
+          alpha = 0.7, size = 5) +
+  
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Ratio Of Completeness of Harmattan to Non-Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw()  +
+  scale_color_gradientn(
+    colors = c("#eb4c2d", "orange", "white", "#bb7ede", "#97b9d9", "#0540a1"),
+    values = scales::rescale(c(0, 0.5, 1, 1.2, 2, 3.1)),  # adjust these values as needed for your data range
+    name = "Ratio"
+  )
+
+# Convert to interactive plot
+ggplotly(p, tooltip = "text")
+```
+
+
+```{r facet wrap no annotated ratio, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+## Using facet wrap to put them in same plot
+
+# Merge Harmattan and Non-Harmattan Data
+monitor_obs_combined <- monitor_obs_count_type_harmattan %>%
+  select(monitor, source, percentage, description) %>%
+  mutate(period = "Harmattan") %>%
+  bind_rows(monitor_obs_count_type_non_harmattan %>%
+              select(monitor, source, percentage, description) %>%
+              mutate(period = "Non-Harmattan"))
+
+# Ensure the Harmattan ranking order is used
+monitor_obs_combined <- monitor_obs_combined %>%
+  mutate(monitor = factor(monitor, levels = monitor_order_harmattan))
+
+# Ensure SD card is stacked on top of cloud data
+monitor_obs_combined <- monitor_obs_combined %>%
+  mutate(source = factor(source, levels = c("sd_card", "cloud")))
+
+# Stacked bar plot with SD card on top
+ggplot(monitor_obs_combined, aes(x = description, y = percentage, fill = source)) +
+  geom_bar(stat = "identity", position = "stack") +  # Stack data sources
+  facet_wrap(~period) +  # Separate plots for Harmattan and Non-Harmattan
+  labs(
+    title = "Data Completeness by Monitor (Harmattan vs. Non-Harmattan)",
+    x = "Monitor",
+    y = "Percentage of Data Recorded",
+    fill = "Data Source"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14)
+  ) +
+  scale_fill_manual(
+    values = c("cloud" = "#2599db", "sd_card" = "#b54033"),
+    labels = c("cloud" = "Cloud Data", "sd_card" = "SD Card Data")
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, 100))
+
+```
+
+
+
+```{r side by side stacked, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+## side by side stacked 
+
+monitor_order_harmattan <- monitor_obs_count_type_harmattan %>%
+  filter(source %in% c("cloud", "sd_card")) %>%
+  group_by(description) %>%
+  summarise(total = sum(percentage)) %>%
+  arrange(desc(total)) %>%
+  pull(description)
+
+
+
+
+# Merge Harmattan and Non-Harmattan Data
+monitor_obs_combined <- monitor_obs_count_type_harmattan %>%
+  select(monitor, source, percentage, description) %>%
+  mutate(period = "Harmattan") %>%
+  bind_rows(monitor_obs_count_type_non_harmattan %>%
+              select(monitor, source, percentage, description) %>%
+              mutate(period = "Non-Harmattan"))
+
+# Ensure the Harmattan ranking order is used for both periods
+monitor_obs_combined <- monitor_obs_combined %>%
+  mutate(description = factor(description, levels = unique(description[period == "Harmattan"])))
+
+# Ensure SD card is stacked on top of cloud data
+monitor_obs_combined <- monitor_obs_combined %>%
+  mutate(source = factor(source, levels = c("sd_card", "cloud"))) %>%
+  mutate(description = factor(description, levels = monitor_order_harmattan))
+
+# Create a fill category that combines source and period
+monitor_obs_combined <- monitor_obs_combined %>%
+  mutate(fill_category = interaction(source, period, sep = " - "))
+
+
+
+ggplot(monitor_obs_combined) +
+  geom_bar(aes(x = period, y = percentage, fill = source),
+           position = "stack",
+           stat = "identity") +
+  facet_grid(~ description, switch = "x") +  # Facet by monitor
+  theme_bw() +
+  theme(
+    axis.text.x = element_blank(),  # Remove x-axis text
+    axis.ticks.x = element_blank(), # Remove x-axis ticks
+    strip.placement = "outside",
+    strip.background = element_rect(fill = NA, color = "white"),
+    panel.spacing = unit(-.01, "cm"),
+    strip.text = element_text(angle = 90, vjust = 0.5, hjust = 1)  # Rotate facet labels vertically
+  ) +
+  scale_fill_manual(
+    values = c("cloud" = "#2599db", "sd_card" = "#b54033"),
+    labels = c("cloud" = "Cloud Data", "sd_card" = "SD Card Data")
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, 100)) +
+  labs(x = "Community",
+       y = "Percentage Data Complete",
+       title = "Source of Data for Each Monitor",
+       subtitle = "For each monitor, the harmattan data completeness is the left stacked bar, and non-harmattan is on the right.")
+
+```
+
+
+
+```{r wilcoxon, include = FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+
+# ## Paired Wilcoxon signed-rank test to see if percentage of coverage is statistically different harmattan vs non-harmattan
+
+coverage_comparison <- monitor_obs_count_type_harmattan %>%
+  rename(harmattan_percentage = percentage) %>%
+  inner_join(monitor_obs_count_type_non_harmattan %>% 
+               rename(non_harmattan_percentage = percentage),
+             by = c("monitor", "source"))
+
+wilcox.test(coverage_comparison$harmattan_percentage, coverage_comparison$non_harmattan_percentage, 
+            paired = TRUE, alternative = "two.sided")
+
+```
+
+
+
+

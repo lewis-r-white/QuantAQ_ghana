@@ -31,12 +31,12 @@ summarize_pollution_times <- function(data, pollutant) {
   mean_col <- paste0("mean_", pollutant)
   fleet_col <- paste0("fleet_average_", pollutant)
   
-  # Hourly summary with completeness check (45 minutely observations)
+  # Hourly summary with completeness check (45 valid minutely observations)
   hourly_summary <- data %>%
     group_by(monitor, date, hour) %>%
     summarise(
-      n_minute_obs = n(),  # Count the number of minute-level observations
-      !!mean_col := ifelse(n_minute_obs >= 45, mean(!!sym(pollutant), na.rm = TRUE), NA_real_),  # Only calculate if 75% of minutes are present
+      n_minute_obs = sum(!is.na(!!sym(pollutant))),  # Count non-NA minute-level observations
+      !!mean_col := ifelse(n_minute_obs >= 45, mean(!!sym(pollutant), na.rm = TRUE), NA_real_),  # Only calculate if 75% of minutes are non-NA
       .groups = 'drop'
     )
   
@@ -44,7 +44,7 @@ summarize_pollution_times <- function(data, pollutant) {
   daily_summary <- hourly_summary %>%
     group_by(monitor, date) %>%
     summarise(
-      n_complete_hours = sum(!is.na(!!sym(mean_col))),  # Count the number of complete hours
+      n_complete_hours = sum(!is.na(!!sym(mean_col))),  # Count non-NA complete hours
       !!mean_col := ifelse(n_complete_hours >= 18, mean(!!sym(mean_col), na.rm = TRUE), NA_real_),  # Only calculate if 75% of hours are complete
       .groups = 'drop'
     )
@@ -70,3 +70,4 @@ summarize_pollution_times <- function(data, pollutant) {
   
   list(hourly = hourly_full, daily = daily_full)
 }
+

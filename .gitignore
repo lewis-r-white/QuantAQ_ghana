@@ -3,6 +3,14 @@
 .Rdata
 .httr-oauth
 .DS_Store
-
 *.html
 *SHP*
+*.csv
+*.rds
+~/.boxr-oauth
+/Users/lewiswhite/.boxr-oauth
+
+/data
+/data_archive
+
+/src/box_api_client_info.R

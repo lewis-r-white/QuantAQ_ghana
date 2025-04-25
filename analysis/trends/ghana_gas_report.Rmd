@@ -1,0 +1,1752 @@
+---
+title: "Ghana Gas Report"
+output: 
+  html_document:
+    toc: true
+    theme: united
+date: "2024-06-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+library(here) # file path org
+library(lubridate)# working with dates
+library(tictoc) # timing
+library(DT) # datatables
+library(purrr) # applying functions across df
+library(tidyverse) # data cleaning and plotting
+library(data.table) 
+library(sf) # spatial data 
+library(viridis) # color pallete 
+library(knitr)
+library(modelsummary) # table of regressions
+library(spdep)
+library(gstat)
+library(units) 
+library(gridExtra)
+library(broom)
+library(Metrics) 
+library(kableExtra) # table creation
+
+```
+
+
+```{r source functions, echo=FALSE, message=FALSE, warning=FALSE}
+# Source in functions
+
+# source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
+source(here("src", "load_pollution_datasets.R"))
+
+# source function that aggregates data by time scale of interest (hourly, daily)
+source(here("src", "summarize_pollution_times.R"))
+
+# Source function that creates fleet average vs monitor pollutant reading plot
+source(here("src", "compare_fleet_avg_monitor.R"))
+
+# Source function that creates heatmap of pollutant readings
+source(here("src", "generate_heatmap.R"))
+
+# Source function to make map of pollution values at each monitor location
+source(here("src", "generate_spatial_pollution_map.R"))
+
+# source function to calculate moran i 
+source(here("src", "calculate_moran_i.R"))
+
+# source function to prepare data for road regression analysis and plotting
+source(here("src", "prep_monitor_road_data.R"))
+
+# source function to plot map of pollutant levels by location with roads 
+source(here("src", "generate_spatial_pollution_road_map.R"))
+
+# source function to run regression analysis on pollutant / distance to road
+source(here("src", "regress_pollutant_road.R"))
+
+# source function to apply regressions when comparing monitor to fleet average
+source(here("src", "compare_fleet_regression.R"))
+
+# source functions to merge in the SD card data for cases when server data is missing 
+source(here("src", "merge_sd_data.R"))
+source(here("src", "process_multiple_pollutants.R"))
+
+#source functions to create plot that compares individual monitor to golden monitor
+source(here("src", "compare_gas_to_reference_functions.R"))
+
+#source functions to create plot that compares individual monitor to golden monitor
+source(here("src", "calc_gas_regressions.R"))
+```
+
+```{r location data, echo=FALSE, message=FALSE, warning=FALSE}
+#LOAD LOCATION DATA ----
+monitor_community_info <- read_csv(here("data", "monitor_community_info.csv"))
+
+# create spatial feature dataset of monitor points
+#monitor_points <- st_as_sf(monitor_community_info, coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+
+monitor_points <- monitor_community_info %>%
+  st_as_sf(coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+
+# LOAD IN THE COUNTRY AND REGION MAP DATA ----
+
+country <- st_read(here("data", "spatial", "ghana_boundaries_shp", "gha_admbnda_adm0_gss_20210308.shp"), quiet = TRUE)
+
+regions <- st_read(here("data", "spatial", "ghana_boundaries_shp",  "gha_admbnda_adm1_gss_20210308.shp"), quiet = TRUE) %>%
+  rename(region = ADM1_EN)
+
+bono_east <- regions %>% filter(region == "Bono East")
+
+
+## SPECIFIC TOWN MARKERS ----
+
+# just the lat/lon for kintampo
+kintampo_sf <- st_as_sf(data.frame(
+  location = "Kintampo",
+  geo_lon = -1.7296,
+  geo_lat = 8.0593
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+# Dwenewoho
+dwenewoho_sf <- st_as_sf(data.frame(
+  location = "dwenewoho",
+  geo_lon = -1.8325,
+  geo_lat = 7.7403
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+
+# New Longoro
+new_longoro_sf <- st_as_sf(data.frame(
+  location = "New Longoro",
+  geo_lon = -2.02953,
+  geo_lat = 8.14399
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+# Apesika
+apesika_sf <- st_as_sf(data.frame(
+  location = "Apesika",
+  geo_lon = -1.5453,
+  geo_lat = 7.99838
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+# Kurawura Akura
+kurawura_akura_sf <- st_as_sf(data.frame(
+  location = "Kurawura Akura",
+  geo_lon = -1.4684,
+  geo_lat = 8.7380
+), coords = c("geo_lon", "geo_lat"), crs = st_crs(4326))
+
+
+# LOAD IN THE ROADS DATA ----
+
+# Load roads data and set CRS (assuming it's EPSG:4326)
+roads <- st_read(here("data", "spatial", "ghana_roads_shp", "hotosm_gha_roads_lines_shp.shp"), quiet = TRUE)
+st_crs(roads) <- 4326
+
+#Filter the roads to only bono east
+roads_filtered <- st_intersection(roads, bono_east)
+```
+
+
+
+## Monitor Locations
+
+```{r plot monitor locations, echo=FALSE, message=FALSE, warning=FALSE}
+# Define the bounding box coordinates
+bbox_coords <- matrix(c(-2.2, 7.6, -2.2, 8.8, -1.3, 8.8, -1.3, 7.6, -2.2, 7.6), ncol = 2, byrow = TRUE)
+bbox_polygon <- st_polygon(list(bbox_coords))
+bbox_sf <- st_sfc(bbox_polygon, crs = st_crs(4326))
+
+# Plot the map with the bounding box
+ggplot() +
+  # Add Ghana regions
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5) +
+  # Add monitor points with transparency
+  geom_sf(data = monitor_points, aes(geometry = geometry), color = "red", alpha = 0.5, size = 2) +
+  # Add bounding box
+  geom_sf(data = bbox_sf, fill = NA, color = "blue", lwd = 0.5, linetype = "solid") +
+  # Add Ghana country boundary
+  geom_sf(data = country, fill = NA, color = "black", size = 1) +
+  #labs(title = "Monitor Locations in Ghana") +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 1), # Increase tick mark size
+    plot.title = element_text(size = 16) 
+  )
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5) +
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = monitor_points, aes(geometry = geometry, color = monitor_type), alpha = 0.5, size = 5) +
+  
+  # Add Kintampo marker
+  geom_sf(data = kintampo_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add Dwenewoho marker
+  geom_sf(data = dwenewoho_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add new longoro marker
+  geom_sf(data = new_longoro_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add apesika marker
+  geom_sf(data = apesika_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  # Add kurawura akura marker
+  geom_sf(data = kurawura_akura_sf, aes(geometry = geometry), shape = 20, size = 3, color = "black") +
+  
+  # Add Kintamp annotation text
+  annotate("text", x = -1.73, y = 8.10, label = "Kintampo", color = "black", size = 5) +
+  # Add Dwenewoho annotation text
+  annotate("text", x = -1.69, y = 7.74, label = "Dwenewoho", color = "black", size = 5) +
+  # Add new longoro annotation text
+  annotate("text", x = -2.047, y = 8.214, label = "New Longoro", color = "black", size = 5) +
+  # Add apesika annotation text
+  annotate("text", x = -1.459, y = 7.96, label = "Apesika", color = "black", size = 5) +
+  # Add atta akura annotation text
+  annotate("text", x = -1.65, y = 8.75, label = "Kurawura Akura", color = "black", size = 5) +
+  
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  labs(x = "", 
+       y = "",
+       color = "Monitor Type") +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.5), # Increase tick mark size
+    plot.title = element_text(size = 16), # Increase title size
+    legend.text = element_text(size = 10), # Increase legend text size
+    legend.title = element_text(size = 12) # Increase legend title size
+  )
+```
+
+
+## Load corrected pollution data and create summaries 
+
+```{r}
+## LOAD GAS DATA ----
+
+# load full gas data
+gas_corrected_full <- readRDS(here("data", "gas", "final", "corrected_community_gas_20230926-20240816.rds"))
+
+# load individual gas data summarized
+co_community_hourly <- readRDS(here("data", "gas", "summarized", "co_community_hourly_20231024-20240816.rds"))
+co_community_daily <- readRDS(here("data", "gas", "summarized", "co_community_daily_20231024-20240816.rds"))
+
+no_community_hourly <- readRDS(here("data", "gas", "summarized", "no_community_hourly_20231024-20240816.rds"))
+no_community_daily <- readRDS(here("data", "gas", "summarized", "no_community_daily_20231024-20240816.rds"))
+
+no2_community_hourly <- readRDS(here("data", "gas", "summarized", "no2_community_hourly_20231024-20240816.rds"))
+no2_community_daily <- readRDS(here("data", "gas", "summarized", "no2_community_daily_20231024-20240816.rds"))
+
+o3_community_hourly <- readRDS(here("data", "gas", "summarized", "o3_community_hourly_20231024-20240816.rds"))
+o3_community_daily <- readRDS(here("data", "gas", "summarized", "o3_community_daily_20231024-20240816.rds"))
+```
+
+
+
+```{r}
+#monitor missingness
+monitor_missingness <- gas_corrected_full %>% 
+  group_by(monitor) %>% 
+  summarise(missing_rate = mean(is.na(o3)) * 100) %>%
+  mutate(monitor = fct_reorder(monitor, -missing_rate))
+
+# MAP OF MONITOR MISSINGNESS BY LOCATION ----
+missing_monitor_location <- left_join(monitor_missingness, monitor_points)
+```
+
+
+## Data source (Cloud vs SD for each monitor)
+
+```{r plot cloud vs sd data, echo=FALSE, message=FALSE, warning=FALSE}
+monitor_obs_count_type <- gas_corrected_full %>%
+  group_by(monitor, source) %>%
+  summarise(count = n()) %>%
+  ungroup() %>%
+  group_by(monitor) %>%
+  mutate(percentage = count / sum(count) * 100) %>%
+  ungroup() %>%
+  filter(!is.na(source)) %>%
+  mutate(source = factor(source, levels = c("sd_card", "cloud")))
+
+monitor_order <- monitor_obs_count_type %>%
+  filter(source %in% c("cloud", "sd_card")) %>%
+  group_by(monitor) %>%
+  summarise(total = sum(percentage)) %>%
+  arrange(desc(total)) %>%
+  pull(monitor)
+
+monitor_obs_count_type <- monitor_obs_count_type %>%
+  mutate(monitor = factor(monitor, levels = monitor_order))
+
+ggplot(monitor_obs_count_type, aes(x = monitor, y = percentage, fill = source)) +
+  geom_bar(stat = "identity") +
+  labs(title = "",
+       x = "Monitor",
+       y = "Percentage of Data Recorded",
+       fill = "Data Source") +  # Custom legend title
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        axis.title.x = element_text(size = 14),  # Increase x-axis title size
+        axis.title.y = element_text(size = 14),  # Increase y-axis title size
+        legend.text = element_text(size = 12),   # Increase legend text size
+        legend.title = element_text(size = 14)) +  # Increase legend title size
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, 100)) +
+  scale_fill_manual(values = c("cloud" = "#2599db", "sd_card" = "#b54033"),
+                    labels = c("cloud" = "Cloud", "sd_card" = "SD Card"))
+
+
+```
+
+
+
+# Gas Pollution Trends
+
+## Grand Average plots 
+
+```{r grand average facet, echo=FALSE, message=FALSE, warning=FALSE}
+# join daily PM into one dataset
+daily_pollutants <- left_join(co_community_daily, no_community_daily) %>% 
+  left_join(no2_community_daily) %>%
+  left_join(o3_community_daily)
+
+
+daily_pollutants$date <- as.Date(daily_pollutants$date)
+
+
+# pivot longer data so each measurement is its own row 
+daily_pollutants_long <- daily_pollutants %>%
+  group_by(date) %>%
+  summarise('Mean CO' = mean(mean_co, na.rm = TRUE),
+            'Mean NO' = mean(mean_no, na.rm = TRUE),
+            'Mean NO2' = mean(mean_no2, na.rm = TRUE),
+            'Mean O3' = mean(mean_o3, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_longer(cols = c("Mean CO", "Mean NO", "Mean NO2", "Mean O3"), names_to = "pollutant", values_to = "measurement")
+
+# Calculate the mean values for each pollutant
+mean_values <- daily_pollutants_long %>%
+  group_by(pollutant) %>%
+  summarise(mean_measurement = signif(mean(measurement, na.rm = TRUE), 3))
+
+# Merge the mean values back into the original data frame for plotting
+daily_pollutants_long <- daily_pollutants_long %>%
+  left_join(mean_values, by = "pollutant")
+
+
+# Convert the 'pollutant' column to a factor with the desired order
+daily_pollutants_long$pollutant <- factor(daily_pollutants_long$pollutant, levels = c("Mean CO", "Mean NO", "Mean NO2", "Mean O3"))
+
+
+daily_pollutants_long %>%
+  ggplot(aes(x = date, y = measurement)) +
+  geom_line() +
+  geom_hline(aes(yintercept = mean_measurement), color = "#cc1414", linetype = "dashed") +
+  geom_text(data = mean_values, aes(x = max(daily_pollutants_long$date), y = mean_measurement, label = paste0(pollutant, ": ", round(mean_measurement, 2), " ppb")),
+            color = "#cc1414", hjust = 1, vjust = -4.5, size = 4.5) +
+  theme_bw() +
+  labs(x = "Date",
+       y = "Gas Measurement (ppb)") +
+  facet_grid(factor(pollutant, levels = c("Mean CO", "Mean NO", "Mean NO2", "Mean O3")) ~ ., scales = "free_y") +
+  theme(
+    axis.title = element_text(size = 14),   # Increase axis titles size
+    axis.text = element_text(size = 12),    # Increase axis labels size
+    strip.text = element_text(size = 12)  # Increase facet group text size
+  )
+
+```
+
+
+
+# Carbon Monixide Community Deployment
+
+### Checking Individual Monitor to Fleet Average
+
+```{r monitor vs fleet avg 25, fig.height=10, fig.width=7, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(co_community_hourly, "co", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(co_community_daily, "co", "daily")
+```
+
+### PM Carbon Monixide Trends
+
+```{r co timelines, echo=FALSE, message=FALSE, warning=FALSE}
+daily_co_all_devices <- gas_corrected_full %>%
+  group_by(date, monitor) %>%
+  summarize(mean_co = mean(co, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_co, group = monitor)) +
+  geom_line(color = "black", alpha = 0.2) +
+  theme_minimal() +
+  labs(y = "Mean CO",
+       title = "Average CO Accross All Devices")
+
+daily_cooktime_co_all_devices <- gas_corrected_full %>%
+  filter(hour >= 16 & hour < 20) %>%
+  group_by(monitor, date) %>%
+  summarise(mean_co = mean(co, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_co, group = monitor)) +
+  geom_line(color = "black", alpha = 0.4) +
+  theme_minimal() +
+  labs(y = "Mean CO",
+       title = "Daily Average CO for Each Monitor During Primary Cooking Hours (4-8)") 
+
+grid.arrange(daily_co_all_devices, daily_cooktime_co_all_devices)
+
+daily_co_timeline <- gas_corrected_full %>%
+  group_by(date) %>%
+  summarize(mean_co = mean(co, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_co)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM CO",
+       title = "Average CO Accross All Devices")
+
+daily_cooktime_co_timeline <- gas_corrected_full %>%
+  filter(hour >= 16 & hour < 20) %>%
+  group_by(date) %>%
+  summarize(mean_co = mean(co, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_co)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM CO",
+       title = "Mean CO Accross All Devices During Cooking Hours (4-8)")
+
+grid.arrange(daily_co_timeline, daily_cooktime_co_timeline)
+```
+
+
+### Harmattan vs non-Harmattan + Cooktime vs non-Cooktime
+
+```{r co trends harmattan and cooktime calc, echo=FALSE, message=FALSE, warning=FALSE}
+harmattan_start <- as.Date("2023-12-01")
+harmattan_end <- as.Date("2024-03-01")
+
+co_community_hourly_seasonality <- co_community_hourly %>% 
+  mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan")) %>%
+  mutate(
+    cooking_period = factor(case_when(
+      hour >= 16 & hour <= 19 ~ "Evening Cooking Hours", #4-9pm
+      hour >= 5 & hour <= 8 ~ "Morning Cooking Hours", #5-9am
+      (hour < 16 | hour > 19) &  (hour < 5 | hour > 8) & hour != 3 ~ "Other Hours",
+      hour == 3 ~ "Control Hour"
+    ), levels = c("Evening Cooking Hours", "Morning Cooking Hours", "Control Hour", "Other Hours"))
+  )
+
+
+# hourly pm 2.5 data from just harmattan only
+harmattan_co_hourly <- co_community_hourly_seasonality %>% filter(date >= harmattan_start & date <= harmattan_end) %>% 
+  filter(!is.na(hour)) 
+
+# hourly pm 2.5 data from not harmattan only
+not_harmattan_co_hourly <- co_community_hourly_seasonality %>% filter(date < harmattan_start | date > harmattan_end) %>%
+  filter(!is.na(hour)) 
+
+
+# mean and sd co during harmattan
+mean(harmattan_co_hourly$mean_co, na.rm = TRUE)
+sd(harmattan_co_hourly$mean_co, na.rm = TRUE)
+
+# mean and sd co NOT during harmattan
+mean(not_harmattan_co_hourly$mean_co, na.rm = TRUE)
+sd(not_harmattan_co_hourly$mean_co, na.rm = TRUE)
+
+
+
+
+# COMPARING COOKTIME PM 2.5 ACROSS ALL SEASONS
+anova_result <- aov(mean_co ~ cooking_period, data = co_community_hourly_seasonality)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+# COMPARING COOKTIME PM 2.5 DURING HARMATTAN
+
+anova_result <- aov(mean_co ~ cooking_period, data = harmattan_co_hourly)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+# COMPARING COOKTIME PM 2.5 NOT HARMATTAN
+
+anova_result <- aov(mean_co ~ cooking_period, data = not_harmattan_co_hourly)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+
+# COOKTIME VS NOT COOKTIME COMP (MEANS AND SDs)
+
+evening_cooktime_co_hourly <- co_community_hourly_seasonality %>% filter(cooking_period == "Evening Cooking Hours") %>% 
+  filter(!is.na(hour)) 
+
+morning_cooktime_co_hourly <- co_community_hourly_seasonality %>% filter(cooking_period == "Morning Cooking Hours") %>% 
+  filter(!is.na(hour)) 
+
+other_co_hourly <- co_community_hourly_seasonality %>% filter(cooking_period == "Other Hours") %>% 
+  filter(!is.na(hour)) 
+
+control_co_hourly <- co_community_hourly_seasonality %>% filter(cooking_period == "Control Hour") %>% 
+  filter(!is.na(hour)) 
+
+mean(evening_cooktime_co_hourly$mean_co, na.rm = TRUE) 
+sd(evening_cooktime_co_hourly$mean_co, na.rm = TRUE) 
+
+mean(morning_cooktime_co_hourly$mean_co, na.rm = TRUE)  
+sd(morning_cooktime_co_hourly$mean_co, na.rm = TRUE) 
+
+mean(other_co_hourly$mean_co, na.rm = TRUE)  
+sd(other_co_hourly$mean_co, na.rm = TRUE) 
+
+mean(control_co_hourly$mean_co, na.rm = TRUE)  
+sd(control_co_hourly$mean_co, na.rm = TRUE)
+
+
+# COOKTIME VS NOT COOKTIME VS CONTROL DURING HARMATTAN (MEANS AND SDs)
+
+mean(harmattan_co_hourly$mean_co[harmattan_co_hourly$cooking_period == "Evening Cooking Hours"], na.rm = TRUE)
+sd(harmattan_co_hourly$mean_co[harmattan_co_hourly$cooking_period == "Evening Cooking Hours"], na.rm = TRUE)
+
+mean(harmattan_co_hourly$mean_co[harmattan_co_hourly$cooking_period == "Morning Cooking Hours"], na.rm = TRUE)
+sd(harmattan_co_hourly$mean_co[harmattan_co_hourly$cooking_period == "Morning Cooking Hours"], na.rm = TRUE)
+
+mean(harmattan_co_hourly$mean_co[harmattan_co_hourly$cooking_period == "Other Hours"], na.rm = TRUE)
+sd(harmattan_co_hourly$mean_co[harmattan_co_hourly$cooking_period == "Other Hours"], na.rm = TRUE)
+
+mean(harmattan_co_hourly$mean_co[harmattan_co_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+sd(harmattan_co_hourly$mean_co[harmattan_co_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+
+# COOKTIME VS NOT COOKTIME NOT DURING HARMATTAN (MEANS AND SDs)
+
+mean(not_harmattan_co_hourly$mean_co[not_harmattan_co_hourly$cooking_period == "Evening Cooking Hours"], na.rm = TRUE)
+sd(not_harmattan_co_hourly$mean_co[not_harmattan_co_hourly$cooking_period == "Evening Cooking Hours"], na.rm = TRUE)
+
+mean(not_harmattan_co_hourly$mean_co[not_harmattan_co_hourly$cooking_period == "Morning Cooking Hours"], na.rm = TRUE)
+sd(not_harmattan_co_hourly$mean_co[not_harmattan_co_hourly$cooking_period == "Morning Cooking Hours"], na.rm = TRUE)
+
+mean(not_harmattan_co_hourly$mean_co[not_harmattan_co_hourly$cooking_period == "Other Hours"], na.rm = TRUE)
+sd(not_harmattan_co_hourly$mean_co[not_harmattan_co_hourly$cooking_period == "Other Hours"], na.rm = TRUE)
+
+mean(not_harmattan_co_hourly$mean_co[not_harmattan_co_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+sd(not_harmattan_co_hourly$mean_co[not_harmattan_co_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+```
+
+```{r co trends harmattan and cooktime plot, echo=FALSE, message=FALSE, warning=FALSE}
+## PLOTTING THE COMPARISONS 
+
+base_plot <- co_community_hourly %>% 
+  mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan")) %>%
+  mutate(
+    cooking_period = factor(case_when(
+      hour >= 16 & hour <= 19 ~ "Evening Cooking Hours", #4-9pm
+      hour >= 5 & hour <= 8 ~ "Morning Cooking Hours", #5-9am
+      (hour < 16 | hour > 19) &  (hour < 5 | hour > 8) & hour != 3 ~ "Other Hours",
+      hour == 3 ~ "Control Hour"
+    ), levels = c("Evening Cooking Hours", "Morning Cooking Hours", "Control Hour", "Other Hours"))
+  ) %>%
+  filter(!is.na(hour)) %>%
+  ggplot(aes(x = harmattan, y = mean_co, fill = cooking_period)) +
+  geom_boxplot() +
+  theme_classic() +
+  labs(y = "CO Concentration (ppb)", 
+       x = "Season",
+       fill = "Cooking\nPeriod") +  # Change legend title and add line breaks
+  theme(legend.position = "right") +
+  scale_fill_manual(values = c(
+    "Evening Cooking Hours" = "goldenrod", 
+    "Morning Cooking Hours" = "#7db569", 
+    "Control Hour" = "#b672e0",
+    "Other Hours" = "#52b3eb"
+  ),
+  labels = c("Evening Cooking Hours (4pm-8pm)", "Morning Cooking Hours (5am-9am)", "Control Hour (3am)", "Other Hours (Excluding Cooking \nand Control Hours)"))  # Add line breaks in legend labels
+
+
+
+## NOTE: SIGNFICANCE STARS AND BARS CREATED MANUALLY USING ANOVA AND TUKEY TESTS ABOVE. NEW DATA MAY REQURE DIFFERENT STARS.
+base_plot +
+  geom_segment(aes(x = 0.72, xend = 0.90, y = 10000, yend = 10000), color = "black") +  # Harmattan 
+  annotate("text", x = 0.81, y = 10100, label = "***") +
+  
+  geom_segment(aes(x = 0.91, xend = 1.09, y = 10000, yend = 10000), color = "black") +  # Harmattan 
+  annotate("text", x = 1, y = 10100, label = "***") +
+  
+  geom_segment(aes(x = 1.10, xend = 1.28, y = 10000, yend = 10000), color = "black") +  # Harmattan 
+  annotate("text", x = 1.19, y = 10100, label = "") +
+  
+  geom_segment(aes(x = 0.72, xend = 1.09, y = 10250, yend = 10250), color = "black") +  # Harmattan 
+  annotate("text", x = 0.9, y = 10350, label = "***") +
+  
+  geom_segment(aes(x = 0.91, xend = 1.27, y = 10550, yend = 10550), color = "black") +  # Harmattan
+  annotate("text", x = 1.09, y = 10675, label = "***") +
+  
+  geom_segment(aes(x = 0.72, xend = 1.27, y = 10850, yend = 10850), color = "black") +  # Harmattan
+  annotate("text", x = 1, y = 11000, label = "***") +
+  
+  
+  
+  geom_segment(aes(x = 1.72, xend = 1.90, y = 10000, yend = 10000), color = "black") +  # Not Harmattan 
+  annotate("text", x = 1.81, y = 10100, label = "***") +
+  
+  geom_segment(aes(x = 1.91, xend = 2.09, y = 10000, yend = 10000), color = "black") +  # Not Harmattan 
+  annotate("text", x = 2.0, y = 10100, label = "***") +
+  
+  geom_segment(aes(x = 2.10, xend = 2.28, y = 10000, yend = 10000), color = "black") +  # Not Harmattan 
+  annotate("text", x = 2.19, y = 10100, label = "***") +
+  
+  geom_segment(aes(x = 1.72, xend = 2.09, y = 10250, yend = 10250), color = "black") +  # Not Harmattan 
+  annotate("text", x = 1.9, y = 10350, label = "***") +
+  
+  geom_segment(aes(x = 1.91, xend = 2.28, y = 10550, yend = 10550), color = "black") +  # Not Harmattan 
+  annotate("text", x = 2.09, y = 10675, label = "***") +
+  
+  geom_segment(aes(x = 1.72, xend = 2.27, y = 10850, yend = 10850), color = "black") +  # Not Harmattan 
+  annotate("text", x = 2, y = 11000, label = "***") +
+  
+  
+  geom_segment(aes(x = 1, xend = 2, y = 11300, yend = 11300), color = "black") +  # Harmattan vs Not Harmattan
+  annotate("text", x = 1.5, y = 11425, label = "***") +
+  
+  labs(caption ="Comparisons and their significance are denoted by the horizontal lines, where * indicates p <0.05, ** indicates p < 0.01, and *** indicates p < 0.001") +
+  
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    legend.text = element_text(size = 10), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    plot.caption = element_text(size = 11),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+  )
+
+```
+
+### Spatial Correlation
+
+```{r spatial correlation 25, echo=FALSE, message=FALSE, warning=FALSE}
+generate_spatial_pollution_map(gas_corrected_full, "co", missing_monitor_location)
+```
+
+### Making maps for each size class
+
+```{r pm maps during harmattan, echo=FALSE, message=FALSE, warning=FALSE}
+# DURING HARMATTAN ----
+
+# CO
+co_summary <- gas_corrected_full %>%
+  filter(date >= harmattan_start & date < harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_co = mean(co, na.rm = TRUE),
+            median_co = median(co, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = co_summary %>% filter(!is.na(mean_co)), aes(geometry = geometry, color = mean_co), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean CO for Each Monitor During Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d",
+                       breaks = c(min(co_summary$mean_co), 
+                                  min(co_summary$mean_co + (max(co_summary$mean_co) - min(co_summary$mean_co))/2),
+                                  max(co_summary$mean_co)),
+                       labels = c(paste(round(min(co_summary$mean_co),0)), 
+                                  paste(round((min(co_summary$mean_co + (max(co_summary$mean_co) - min(co_summary$mean_co))/2)),0)),
+                                  paste(round(max(co_summary$mean_co),0))),
+                       name = "CO \n(ppb)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+`
+
+
+```
+
+```{r pm maps NOT during harmattan, echo=FALSE, message=FALSE, warning=FALSE}
+# NOT DURING HARMATTTAN ----
+
+co_summary <- gas_corrected_full %>%
+  filter(date < harmattan_start | date >= harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_co = mean(co, na.rm = TRUE),
+            median_co = median(co, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = co_summary %>% filter(!is.na(mean_co)), aes(geometry = geometry, color = mean_co), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean CO for Each Monitor Outside of Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d",
+                       breaks = c(min(co_summary$mean_co), 
+                                  min(co_summary$mean_co + (max(co_summary$mean_co) - min(co_summary$mean_co))/2),
+                                  max(co_summary$mean_co)),
+                       labels = c(paste(round(min(co_summary$mean_co),0)), 
+                                  paste(round((min(co_summary$mean_co + (max(co_summary$mean_co) - min(co_summary$mean_co))/2)),0)),
+                                  paste(round(max(co_summary$mean_co),0))),
+                       name = "CO \n(ppb)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+```
+
+
+## HEATMAP CUSTOMIZATION
+
+```{r heatmap customization, echo = FALSE, warning=FALSE, message=FALSE}
+## CO
+ 
+co_community_hourly <- co_community_hourly %>%
+    mutate(date = ymd(date))  # Use lubridate to ensure date conversion
+  
+heat_map_data <- co_community_hourly %>%
+    group_by(date, hour) %>%
+    summarize(mean_co = mean(mean_co, na.rm = TRUE), .groups = 'drop') %>%
+    ungroup() %>%
+    mutate(day = day(date),
+           month = factor(format(date, "%b"), levels = c("Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug")),
+           year = year(date)) %>%
+  mutate(log_mean_co = log(mean_co))
+
+
+ggplot(heat_map_data, aes(day, hour, fill = mean_co)) +
+    geom_tile(color = NA, size = 0) + 
+    scale_fill_gradientn(
+        colors = c("#221f26", "#3f2363", "#872CA2", "#D44292", "#F98477", "#EDD9A1", "#fffceb"), # Specify your custom colors
+        values = scales::rescale(c(0, 5, 12, 20, 40, 60, 100)), # Set breaks; adjust these values based on your data range
+        breaks = c(200, 2000, 4000, 6000, 7900),  # Add more breaks
+        labels = c("200", "2000", "4000", "6000", "7900"),  # Corresponding labels
+        name = "CO \n(ppb)"
+    ) + 
+    facet_grid(~month) +
+    scale_y_continuous(trans = "reverse", breaks = unique(heat_map_data$hour)) +
+    scale_x_continuous(breaks = c(1, 10, 20, 31)) +
+    theme_minimal(base_size = 8) +
+    labs(x = "Day",
+         y = "Hour") + 
+    theme(legend.position = "right",
+          plot.title = element_text(size = 14, hjust = 0),
+          axis.text.y = element_text(size = 10),
+          strip.background = element_rect(colour = "white"),
+          strip.text = element_text(size = 13),   # Increase facet group text size
+          axis.ticks = element_blank(),
+          axis.text = element_text(size = 10),
+          legend.title = element_text(size = 12),
+          legend.text = element_text(size = 11),
+          axis.title.y = element_text(size = 14),
+          axis.title.x = element_text(size = 14),
+          panel.background = element_blank())
+```
+
+
+## APPENDIX PLOTS
+
+```{r time series co individual monitor locations facet, echo=FALSE, warning= FALSE, message=FALSE}
+monitor_names <- tibble::tribble(
+  ~monitor, ~description, ~location,
+  "MOD-00399", "Dwenewoho", "Dwenewoho GH",
+  "MOD-00398", "Kurawura Akura", "Kurawura Akura GH",
+  "MOD-00397", "Apesika", "Apesika GH",
+  "MOD-00401", "New Longoro", "New Longoro GH",
+  "MOD-00400", "Kintampo-PTC Area (Magazine)", "Kintampo GH"
+)
+
+monitor_names <- monitor_names %>%
+  mutate(location = gsub(" GH", "", location)) %>%
+  mutate(locations = if_else(grepl("Kintampo", location),
+                            paste(description, location, sep = ", "),
+                            location))
+
+# Custom function to add line breaks at a specific length
+add_line_breaks <- function(x, width) {
+  sapply(x, function(y) {
+    if (nchar(y) > width) {
+      paste(strwrap(y, width = width), collapse = "\n")
+    } else {
+      y
+    }
+  })
+}
+
+# Apply custom function to locations
+monitor_names <- monitor_names %>%
+  mutate(locations = if_else(grepl("Kintampo", location),
+                             paste(description, "Kintampo", sep = "\n"),
+                             location)) %>%
+  mutate(locations = add_line_breaks(locations, width = 20))
+
+# Plot with updated facet labels
+gas_corrected_full %>%
+  left_join(monitor_names) %>%
+  group_by(date, locations) %>%
+  summarize(mean_co = mean(co, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_co)) +
+  geom_line(color = "black", alpha = 1) +
+  theme_minimal() +
+  facet_wrap(~locations) +
+  labs(y = "Mean CO") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.title = element_text(size = 14),
+    strip.text = element_text(size = 11)  # Increase facet group text size
+  )
+```
+
+
+# Ozone (O3) Community Deployment
+
+### Checking Individual Monitor to Fleet Average
+
+```{r monitor vs fleet avg 25, fig.height=10, fig.width=7, echo=FALSE, message=FALSE, warning=FALSE}
+# hourly comparison
+compare_fleet_avg_monitor(o3_community_hourly, "o3", "hourly")
+
+# Daily comparison
+compare_fleet_avg_monitor(o3_community_daily, "o3", "daily")
+```
+
+### Ozone Trends
+
+```{r ozone timelines, echo=FALSE, message=FALSE, warning=FALSE}
+daily_o3_all_devices <- gas_corrected_full %>%
+  group_by(date, monitor) %>%
+  summarize(mean_o3 = mean(o3, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_o3, group = monitor)) +
+  geom_line(color = "black", alpha = 0.2) +
+  theme_minimal() +
+  labs(y = "Mean O3",
+       title = "Average O3 Accross All Devices")
+
+daily_cooktime_o3_all_devices <- gas_corrected_full %>%
+  filter(hour >= 16 & hour < 20) %>%
+  group_by(monitor, date) %>%
+  summarise(mean_o3 = mean(o3, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_o3, group = monitor)) +
+  geom_line(color = "black", alpha = 0.4) +
+  theme_minimal() +
+  labs(y = "Mean O3",
+       title = "Daily Average O3 for Each Monitor During Primary Cooking Hours (4-8)") 
+
+grid.arrange(daily_o3_all_devices, daily_cooktime_o3_all_devices)
+
+daily_o3_timeline <- gas_corrected_full %>%
+  group_by(date) %>%
+  summarize(mean_o3 = mean(o3, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_o3)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean PM O3",
+       title = "Average O3 Accross All Devices")
+
+daily_cooktime_o3_timeline <- gas_corrected_full %>%
+  filter(hour >= 16 & hour < 20) %>%
+  group_by(date) %>%
+  summarize(mean_o3 = mean(o3, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_o3)) +
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Mean O3",
+       title = "Mean O3 Accross All Devices During Cooking Hours (4-8)")
+
+grid.arrange(daily_o3_timeline, daily_cooktime_o3_timeline)
+```
+
+
+### Harmattan vs non-Harmattan + Cooktime vs non-Cooktime
+
+```{r ozone trends harmattan and cooktime calc, echo=FALSE, message=FALSE, warning=FALSE}
+harmattan_start <- as.Date("2023-12-01")
+harmattan_end <- as.Date("2024-03-01")
+
+o3_community_hourly_seasonality <- o3_community_hourly %>% 
+  mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan")) %>%
+  mutate(
+    cooking_period = factor(case_when(
+      hour >= 15 & hour <= 18 ~ "Active Cooking Hours",
+      (hour < 15 | hour > 18) & hour != 3 ~ "Non-Active Cooking Hours",
+      hour == 3 ~ "Control Hour"
+    ), levels = c("Active Cooking Hours", "Non-Active Cooking Hours", "Control Hour"))
+  )
+
+
+# hourly pm 2.5 data from just harmattan only
+harmattan_o3_hourly <- o3_community_hourly_seasonality %>% filter(date >= harmattan_start & date <= harmattan_end) %>% 
+  filter(!is.na(hour)) 
+
+# hourly pm 2.5 data from not harmattan only
+not_harmattan_o3_hourly <- o3_community_hourly_seasonality %>% filter(date < harmattan_start | date > harmattan_end) %>%
+  filter(!is.na(hour)) 
+
+
+# mean and sd o3 during harmattan
+mean(harmattan_o3_hourly$mean_o3, na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3, na.rm = TRUE)
+
+# mean and sd o3 NOT during harmattan
+mean(not_harmattan_o3_hourly$mean_o3, na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3, na.rm = TRUE)
+
+
+
+
+# COMPARING COOKTIME O3 ACROSS ALL SEASONS
+anova_result <- aov(mean_o3 ~ cooking_period, data = o3_community_hourly_seasonality)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+# COMPARING COOKTIME PM 2.5 DURING HARMATTAN
+
+anova_result <- aov(mean_o3 ~ cooking_period, data = harmattan_o3_hourly)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+# COMPARING COOKTIME O3 NOT HARMATTAN
+
+anova_result <- aov(mean_o3 ~ cooking_period, data = not_harmattan_o3_hourly)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+
+# COOKTIME VS NOT COOKTIME COMP (MEANS AND SDs)
+
+cooktime_o3_hourly <- o3_community_hourly_seasonality %>% filter(cooking_period == "Active Cooking Hours") %>% 
+  filter(!is.na(hour)) 
+
+not_cooktime_o3_hourly <- o3_community_hourly_seasonality %>% filter(cooking_period == "Non-Active Cooking Hours") %>% 
+  filter(!is.na(hour)) 
+
+control_o3_hourly <- o3_community_hourly_seasonality %>% filter(cooking_period == "Control Hour") %>% 
+  filter(!is.na(hour)) 
+
+mean(cooktime_o3_hourly$mean_o3, na.rm = TRUE) 
+sd(cooktime_o3_hourly$mean_o3, na.rm = TRUE) 
+
+mean(not_cooktime_o3_hourly$mean_o3, na.rm = TRUE)  
+sd(not_cooktime_o3_hourly$mean_o3, na.rm = TRUE) 
+
+mean(control_o3_hourly$mean_o3, na.rm = TRUE)  
+sd(control_o3_hourly$mean_o3, na.rm = TRUE)
+
+
+# COOKTIME VS NOT COOKTIME VS CONTROL DURING HARMATTAN (MEANS AND SDs)
+
+mean(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Active Cooking Hours"], na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Active Cooking Hours"], na.rm = TRUE)
+
+mean(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Non-Active Cooking Hours"], na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Non-Active Cooking Hours"], na.rm = TRUE)
+
+mean(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+
+# COOKTIME VS NOT COOKTIME NOT DURING HARMATTAN (MEANS AND SDs)
+
+mean(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Active Cooking Hours"], na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Active Cooking Hours"], na.rm = TRUE)
+
+mean(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Non-Active Cooking Hours"], na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Non-Active Cooking Hours"], na.rm = TRUE)
+
+mean(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+```
+
+```{r co trends harmattan and cooktime plot, echo=FALSE, message=FALSE, warning=FALSE}
+## PLOTTING THE COMPARISONS 
+
+base_plot <- o3_community_hourly %>% 
+  mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan")) %>%
+  mutate(
+    cooking_period = factor(case_when(
+      hour >= 15 & hour <= 18 ~ "Active Cooking Hours",
+      (hour < 15 | hour > 18) & hour != 3 ~ "Non-Active Cooking Hours",
+      hour == 3 ~ "Control Hour"
+    ), levels = c("Active Cooking Hours", "Non-Active Cooking Hours", "Control Hour"))
+  ) %>%
+  filter(!is.na(hour)) %>%
+  ggplot(aes(x = harmattan, y = mean_o3, fill = cooking_period)) +
+  geom_boxplot() +
+  theme_classic() +
+  labs(y = "O3 Concentration (ppb)", 
+       x = "Season",
+       fill = "Cooking\nPeriod") +  # Change legend title and add line breaks
+  theme(legend.position = "right") +
+  scale_fill_manual(values = c(
+    "Active Cooking Hours" = "goldenrod", 
+    "Non-Active Cooking Hours" = "#52b3eb", 
+    "Control Hour" = "#b672e0"
+  ),
+  labels = c("Evening Cooking Hours (4pm-8pm)", "Other Hours (Excluding Evening Cooking \nand Control Hours)", "Control Hour (3am)"))  # Add line breaks in legend labels
+
+## NOTE: SIGNFICANCE STARS AND BARS CREATED MANUALLY USING ANOVA AND TUKEY TESTS ABOVE. NEW DATA MAY REQURE DIFFERENT STARS.
+base_plot +
+  geom_segment(aes(x = 0.72, xend = 0.98, y = 122, yend = 122), color = "black") +  # Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 0.85, y = 125, label = "***") +
+  
+  geom_segment(aes(x = 1.02, xend = 1.28, y = 122, yend = 122), color = "black") +  # Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 1.15, y = 125, label = "***") +
+  
+  geom_segment(aes(x = 0.72, xend = 1.27, y = 128, yend = 128), color = "black") +  # Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 1, y = 130, label = "***") +
+  
+  geom_segment(aes(x = 1.72, xend = 1.98, y = 122, yend = 122), color = "black") +  # Not Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 1.85, y = 125, label = "***") +
+  
+  geom_segment(aes(x = 2.02, xend = 2.28, y = 122, yend = 122), color = "black") +  # Not Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 2.15, y = 125, label = "***") +
+  
+  geom_segment(aes(x = 1.72, xend = 2.27, y = 128, yend = 128), color = "black") +  # Not Harmattan Cooking Hour vs Not Cooking Hour
+  annotate("text", x = 2, y = 130, label = "***") +
+  
+  geom_segment(aes(x = 1, xend = 2, y = 133, yend = 133), color = "black") +  # Harmattan vs Not Harmattan
+  annotate("text", x = 1.5, y = 135, label = "***") +
+  
+  labs(caption ="Comparisons and their significance are denoted by the horizontal lines, where the three stars indicate p < 0.001.") +
+  
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    legend.text = element_text(size = 10), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    plot.caption = element_text(size = 11),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+  )
+```
+
+
+#### Adding morning cooking hours
+
+```{r ozone trends harmattan and cooktime calc, echo=FALSE, message=FALSE, warning=FALSE}
+harmattan_start <- as.Date("2023-12-01")
+harmattan_end <- as.Date("2024-03-01")
+
+o3_community_hourly_seasonality <- o3_community_hourly %>% 
+  mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan")) %>%
+  mutate(
+    cooking_period = factor(case_when(
+      hour >= 16 & hour <= 19 ~ "Evening Cooking Hours", #4-9pm
+      hour >= 5 & hour <= 8 ~ "Morning Cooking Hours", #5-9am
+      (hour < 16 | hour > 19) &  (hour < 5 | hour > 8) & hour != 3 ~ "Other Hours",
+      hour == 3 ~ "Control Hour"
+    ), levels = c("Evening Cooking Hours", "Morning Cooking Hours", "Control Hour", "Other Hours"))
+  )
+
+
+# hourly pm 2.5 data from just harmattan only
+harmattan_o3_hourly <- o3_community_hourly_seasonality %>% filter(date >= harmattan_start & date <= harmattan_end) %>% 
+  filter(!is.na(hour)) 
+
+# hourly pm 2.5 data from not harmattan only
+not_harmattan_o3_hourly <- o3_community_hourly_seasonality %>% filter(date < harmattan_start | date > harmattan_end) %>%
+  filter(!is.na(hour)) 
+
+
+# mean and sd o3 during harmattan
+mean(harmattan_o3_hourly$mean_o3, na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3, na.rm = TRUE)
+
+# mean and sd o3 NOT during harmattan
+mean(not_harmattan_o3_hourly$mean_o3, na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3, na.rm = TRUE)
+
+
+
+
+# COMPARING COOKTIME O3 ACROSS ALL SEASONS
+anova_result <- aov(mean_o3 ~ cooking_period, data = o3_community_hourly_seasonality)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+# COMPARING COOKTIME O3 DURING HARMATTAN
+
+anova_result <- aov(mean_o3 ~ cooking_period, data = harmattan_o3_hourly)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+# COMPARING COOKTIME O3 NOT HARMATTAN
+
+anova_result <- aov(mean_o3 ~ cooking_period, data = not_harmattan_o3_hourly)
+summary(anova_result)
+
+# Tukey's Honest Significant Difference test
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+
+
+
+
+# COOKTIME VS NOT COOKTIME COMP (MEANS AND SDs)
+
+evening_cooktime_o3_hourly <- o3_community_hourly_seasonality %>% filter(cooking_period == "Evening Cooking Hours") %>% 
+  filter(!is.na(hour)) 
+
+morning_cooktime_o3_hourly <- o3_community_hourly_seasonality %>% filter(cooking_period == "Morning Cooking Hours") %>% 
+  filter(!is.na(hour)) 
+
+other_o3_hourly <- o3_community_hourly_seasonality %>% filter(cooking_period == "Other Hours") %>% 
+  filter(!is.na(hour)) 
+
+control_o3_hourly <- o3_community_hourly_seasonality %>% filter(cooking_period == "Control Hour") %>% 
+  filter(!is.na(hour)) 
+
+
+mean(evening_cooktime_o3_hourly$mean_o3, na.rm = TRUE) 
+sd(evening_cooktime_o3_hourly$mean_o3, na.rm = TRUE) 
+
+mean(morning_cooktime_o3_hourly$mean_o3, na.rm = TRUE)  
+sd(morning_cooktime_o3_hourly$mean_o3, na.rm = TRUE) 
+
+mean(other_o3_hourly$mean_o3, na.rm = TRUE)  
+sd(other_o3_hourly$mean_o3, na.rm = TRUE) 
+
+mean(control_o3_hourly$mean_o3, na.rm = TRUE)  
+sd(control_o3_hourly$mean_o3, na.rm = TRUE)
+
+
+# COOKTIME VS NOT COOKTIME VS CONTROL DURING HARMATTAN (MEANS AND SDs)
+
+mean(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Evening Cooking Hours"], na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Evening Cooking Hours"], na.rm = TRUE)
+
+mean(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Morning Cooking Hours"], na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Morning Cooking Hours"], na.rm = TRUE)
+
+mean(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Other Hours"], na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Other Hours"], na.rm = TRUE)
+
+mean(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+sd(harmattan_o3_hourly$mean_o3[harmattan_o3_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+
+# COOKTIME VS NOT COOKTIME NOT DURING HARMATTAN (MEANS AND SDs)
+
+mean(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Evening Cooking Hours"], na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Evening Cooking Hours"], na.rm = TRUE)
+
+mean(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Morning Cooking Hours"], na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Morning Cooking Hours"], na.rm = TRUE)
+
+mean(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Other Hours"], na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Other Hours"], na.rm = TRUE)
+
+mean(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+sd(not_harmattan_o3_hourly$mean_o3[not_harmattan_o3_hourly$cooking_period == "Control Hour"], na.rm = TRUE)
+```
+
+```{r co trends harmattan and cooktime plot, echo=FALSE, message=FALSE, warning=FALSE}
+## PLOTTING THE COMPARISONS 
+
+base_plot <- o3_community_hourly %>% 
+  mutate(harmattan = ifelse(date >= harmattan_start & date <= harmattan_end, "Harmattan", "Not Harmattan")) %>%
+  mutate(
+    cooking_period = factor(case_when(
+      hour >= 16 & hour <= 19 ~ "Evening Cooking Hours", #4-9pm
+      hour >= 5 & hour <= 8 ~ "Morning Cooking Hours", #5-9am
+      (hour < 16 | hour > 19) &  (hour < 5 | hour > 8) & hour != 3 ~ "Other Hours",
+      hour == 3 ~ "Control Hour"
+    ), levels = c("Evening Cooking Hours", "Morning Cooking Hours", "Control Hour", "Other Hours"))
+  ) %>%
+  filter(!is.na(hour)) %>%
+  ggplot(aes(x = harmattan, y = mean_o3, fill = cooking_period)) +
+  geom_boxplot() +
+  theme_classic() +
+  labs(y = "O3 Concentration (ppb)", 
+       x = "Season",
+       fill = "Cooking\nPeriod") +  # Change legend title and add line breaks
+  theme(legend.position = "right") +
+  scale_fill_manual(values = c(
+    "Evening Cooking Hours" = "goldenrod", 
+    "Morning Cooking Hours" = "#7db569", 
+    "Control Hour" = "#b672e0",
+    "Other Hours" = "#52b3eb"
+  ),
+  labels = c("Evening Cooking Hours (4pm-8pm)", "Morning Cooking Hours (5am-9am)", "Control Hour (3am)", "Other Hours (Excluding Cooking \nand Control Hours)"))  # Add line breaks in legend labels
+
+
+## NOTE: SIGNFICANCE STARS AND BARS CREATED MANUALLY USING ANOVA AND TUKEY TESTS ABOVE. NEW DATA MAY REQURE DIFFERENT STARS.
+base_plot +
+  geom_segment(aes(x = 0.72, xend = 0.90, y = 121, yend = 121), color = "black") +  # Harmattan 
+  annotate("text", x = 0.81, y = 122, label = "***") +
+  
+  geom_segment(aes(x = 0.91, xend = 1.09, y = 121, yend = 121), color = "black") +  # Harmattan 
+  annotate("text", x = 1, y = 122, label = "***") +
+  
+  geom_segment(aes(x = 1.10, xend = 1.28, y = 121, yend = 121), color = "black") +  # Harmattan 
+  annotate("text", x = 1.19, y = 122, label = "**") +
+  
+  geom_segment(aes(x = 0.72, xend = 1.09, y = 125, yend = 125), color = "black") +  # Harmattan 
+  annotate("text", x = 0.9, y = 126, label = "***") +
+  
+  geom_segment(aes(x = 0.91, xend = 1.27, y = 129, yend = 129), color = "black") +  # Harmattan
+  annotate("text", x = 1.09, y = 130, label = "***") +
+  
+  geom_segment(aes(x = 0.72, xend = 1.27, y = 133, yend = 133), color = "black") +  # Harmattan
+  annotate("text", x = 1, y = 135, label = "***") +
+  
+  
+  
+  geom_segment(aes(x = 1.72, xend = 1.90, y = 121, yend = 121), color = "black") +  # Not Harmattan 
+  annotate("text", x = 1.81, y = 122, label = "***") +
+  
+  geom_segment(aes(x = 1.91, xend = 2.09, y = 121, yend = 121), color = "black") +  # Not Harmattan 
+  annotate("text", x = 2.0, y = 122, label = "") +
+  
+  geom_segment(aes(x = 2.10, xend = 2.28, y = 121, yend = 121), color = "black") +  # Not Harmattan 
+  annotate("text", x = 2.19, y = 122, label = "***") +
+  
+  geom_segment(aes(x = 1.72, xend = 2.09, y = 125, yend = 125), color = "black") +  # Not Harmattan 
+  annotate("text", x = 1.9, y = 126, label = "***") +
+  
+  geom_segment(aes(x = 1.91, xend = 2.28, y = 129, yend = 129), color = "black") +  # Not Harmattan 
+  annotate("text", x = 2.09, y = 130, label = "***") +
+  
+  geom_segment(aes(x = 1.72, xend = 2.27, y = 133, yend = 133), color = "black") +  # Not Harmattan 
+  annotate("text", x = 2, y = 135, label = "***") +
+  
+  
+  geom_segment(aes(x = 1, xend = 2, y = 140, yend = 140), color = "black") +  # Harmattan vs Not Harmattan
+  annotate("text", x = 1.5, y = 142, label = "***") +
+  
+  labs(caption ="Comparisons and their significance are denoted by the horizontal lines, where * indicates p <0.05, ** indicates p < 0.01, and *** indicates p < 0.001.") +
+  
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    legend.text = element_text(size = 10), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    plot.caption = element_text(size = 11),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+  )
+```
+
+
+
+### Spatial Correlation
+
+```{r spatial correlation 25, echo=FALSE, message=FALSE, warning=FALSE}
+generate_spatial_pollution_map(gas_corrected_full, "o3", missing_monitor_location)
+```
+
+### Making maps for each size class
+
+```{r pm maps during harmattan, echo=FALSE, message=FALSE, warning=FALSE}
+# DURING HARMATTAN ----
+
+# O3
+o3_summary <- gas_corrected_full %>%
+  filter(date >= harmattan_start & date < harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_o3 = mean(o3, na.rm = TRUE),
+            median_o3 = median(o3, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = o3_summary %>% filter(!is.na(mean_o3)), aes(geometry = geometry, color = mean_o3), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean O3 for Each Monitor During Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d",
+                       breaks = c(min(o3_summary$mean_o3), 
+                                  min(o3_summary$mean_o3 + (max(o3_summary$mean_o3) - min(o3_summary$mean_o3))/2),
+                                  max(o3_summary$mean_o3)),
+                       labels = c(paste(round(min(o3_summary$mean_o3),0)), 
+                                  paste(round((min(o3_summary$mean_o3 + (max(o3_summary$mean_o3) - min(o3_summary$mean_o3))/2)),0)),
+                                  paste(round(max(o3_summary$mean_o3),0))),
+                       name = "O3 \n(ppb)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+`
+
+
+```
+
+```{r pm maps NOT during harmattan, echo=FALSE, message=FALSE, warning=FALSE}
+# NOT DURING HARMATTTAN ----
+
+o3_summary <- gas_corrected_full %>%
+  filter(date < harmattan_start | date >= harmattan_end) %>%
+  group_by(monitor) %>%
+  summarise(mean_o3 = mean(o3, na.rm = TRUE),
+            median_o3 = median(o3, na.rm = TRUE)) %>%
+  right_join(monitor_points)
+
+
+ggplot() +
+  # Add Ghana regions within the bounding box
+  geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#f5e493", "#dadbe0"), color = "black", alpha = 0.5)  +
+  
+  # Add road data
+  geom_sf(data = roads_filtered, color = "gray", size = 0.3) +  # Add roads data
+  
+  # Add monitor points with transparency within the bounding box
+  geom_sf(data = o3_summary %>% filter(!is.na(mean_o3)), aes(geometry = geometry, color = mean_o3), alpha = 0.7, size = 6) +
+
+  # Zoom in to the bounding box
+  coord_sf(xlim = c(-2.2, -1.3), ylim = c(7.6, 8.8), expand = FALSE) +
+  
+  # Customize
+  labs(title = "Mean O3 for Each Monitor Outside of Harmattan",
+       x = "", 
+       y = "") +
+  theme_bw() +
+  scale_color_gradient(low = "#0540a1", high = "#eb4c2d",
+                       breaks = c(min(o3_summary$mean_o3), 
+                                  min(o3_summary$mean_o3 + (max(o3_summary$mean_o3) - min(o3_summary$mean_o3))/2),
+                                  max(o3_summary$mean_o3)),
+                       labels = c(paste(round(min(o3_summary$mean_o3),0)), 
+                                  paste(round((min(o3_summary$mean_o3 + (max(o3_summary$mean_o3) - min(o3_summary$mean_o3))/2)),0)),
+                                  paste(round(max(o3_summary$mean_o3),0))),
+                       name = "O3 \n(ppb)") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.ticks = element_line(size = 0.7), # Increase tick mark size
+    plot.title = element_text(size = 14), # Increase plot title size
+    legend.text = element_text(size = 12), # Increase legend text size
+    legend.title = element_text(size = 12), # Increase legend title size
+    legend.key.size = unit(1.3, "lines") # Increase legend tick mark size
+  )
+```
+
+
+## HEATMAP CUSTOMIZATION
+
+```{r heatmap customization, echo = FALSE, warning=FALSE, message=FALSE}
+## O3
+ 
+o3_community_hourly <- o3_community_hourly %>%
+    mutate(date = ymd(date))  # Use lubridate to ensure date conversion
+  
+heat_map_data <- o3_community_hourly %>%
+    group_by(date, hour) %>%
+    summarize(mean_o3 = mean(mean_o3, na.rm = TRUE), .groups = 'drop') %>%
+    ungroup() %>%
+    mutate(day = day(date),
+           month = factor(format(date, "%b"), levels = c("Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug")),
+           year = year(date)) %>%
+  mutate(log_mean_o3 = log(mean_o3))
+
+
+ggplot(heat_map_data, aes(day, hour, fill = mean_o3)) +
+    geom_tile(color = NA, size = 0) + 
+    scale_fill_gradientn(
+        colors = c("#221f26", "#3f2363", "#872CA2", "#D44292", "#F98477", "#EDD9A1", "#fffceb"), # Specify your custom colors
+        values = scales::rescale(c(0, 20, 40, 60, 80, 100)), # Set breaks; adjust these values based on your data range
+        # breaks = c(25, 50, 75, 100),  # Add more breaks
+        # labels = c("25", "50", "75", "100"),  # Corresponding labels
+        name = "O3 \n(ppb)"
+    ) + 
+    facet_grid(~month) +
+    scale_y_continuous(trans = "reverse", breaks = unique(heat_map_data$hour)) +
+    scale_x_continuous(breaks = c(1, 10, 20, 31)) +
+    theme_minimal(base_size = 8) +
+    labs(x = "Day",
+         y = "Hour") + 
+    theme(legend.position = "right",
+          plot.title = element_text(size = 14, hjust = 0),
+          axis.text.y = element_text(size = 10),
+          strip.background = element_rect(colour = "white"),
+          strip.text = element_text(size = 13),   # Increase facet group text size
+          axis.ticks = element_blank(),
+          axis.text = element_text(size = 10),
+          legend.title = element_text(size = 12),
+          legend.text = element_text(size = 11),
+          axis.title.y = element_text(size = 14),
+          axis.title.x = element_text(size = 14),
+          panel.background = element_blank())
+```
+
+
+## APPENDIX PLOTS
+
+```{r time series ozone individual monitor locations facet, echo=FALSE, warning= FALSE, message=FALSE}
+monitor_names <- tibble::tribble(
+  ~monitor, ~description, ~location,
+  "MOD-00399", "Dwenewoho", "Dwenewoho GH",
+  "MOD-00398", "Kurawura Akura", "Kurawura Akura GH",
+  "MOD-00397", "Apesika", "Apesika GH",
+  "MOD-00401", "New Longoro", "New Longoro GH",
+  "MOD-00400", "Kintampo-PTC Area (Magazine)", "Kintampo GH"
+)
+
+monitor_names <- monitor_names %>%
+  mutate(location = gsub(" GH", "", location)) %>%
+  mutate(locations = if_else(grepl("Kintampo", location),
+                            paste(description, location, sep = ", "),
+                            location))
+
+# Custom function to add line breaks at a specific length
+add_line_breaks <- function(x, width) {
+  sapply(x, function(y) {
+    if (nchar(y) > width) {
+      paste(strwrap(y, width = width), collapse = "\n")
+    } else {
+      y
+    }
+  })
+}
+
+# Apply custom function to locations
+monitor_names <- monitor_names %>%
+  mutate(locations = if_else(grepl("Kintampo", location),
+                             paste(description, "Kintampo", sep = "\n"),
+                             location)) %>%
+  mutate(locations = add_line_breaks(locations, width = 20))
+
+# Plot with updated facet labels
+gas_corrected_full %>%
+  left_join(monitor_names) %>%
+  group_by(date, locations) %>%
+  summarize(mean_o3 = mean(o3, na.rm = TRUE)) %>%
+  ggplot(aes(x = date, y = mean_o3)) +
+  geom_line(color = "black", alpha = 1) +
+  theme_minimal() +
+  facet_wrap(~locations) +
+  labs(y = "Mean O3") +
+  theme(
+    axis.text = element_text(size = 11), # Increase axis text size
+    axis.title = element_text(size = 14),
+    strip.text = element_text(size = 11)  # Increase facet group text size
+  )
+```
+
+
+
+#### Ozone dual axis plots 
+
+```{r}
+## read in temp data 
+
+temp_clean <- read_rds(here("data", "weather", "merged", "met_temp_merged_20230815-20240820.rds")) %>%
+  mutate(hour = hour(timestamp)) 
+
+temp_community_hourly <- read_rds(here("data", "weather", "summarized", "temp_hourly_20230815-20240820.rds")) 
+
+temp_community_daily <- read_rds(here("data", "weather", "summarized", "temp_daily_20230815-20240820.rds")) 
+
+
+## read in PM data
+
+pm25_corrected <- readRDS(here("data", "pm", "final", "pm25corrected_20231024-20240816.rds"))
+
+pm25_community_hourly <- readRDS(here("data", "pm", "summarized", "pm25_community_hourly_20231024-20240816.rds"))
+pm25_community_daily <- readRDS(here("data", "pm", "summarized", "pm25_community_daily_20231024-20240816.rds"))
+
+```
+
+
+
+```{r}
+daily_o3_all_monitors <- gas_corrected_full %>%
+  group_by(date) %>%
+  summarize(mean_o3 = mean(o3, na.rm = TRUE))
+
+daily_temp_all_monitors <- temp_clean %>%
+  group_by(date) %>%
+  summarize(mean_temp = mean(met_temp, na.rm = TRUE)) %>%
+  filter(date < as.Date("2024-08-17")) %>%
+  filter(date > as.Date("2023-09-25"))
+
+
+daily_pm25_all_monitors <- pm25_corrected %>%
+  group_by(date) %>%
+  summarize(mean_pm25 = mean(pm25, na.rm = TRUE)) 
+
+ozone_temp_pm_full <- left_join(daily_o3_all_monitors, daily_temp_all_monitors) %>%
+  left_join(daily_pm25_all_monitors)
+
+```
+
+```{r}
+# Base R plot with dual y-axes (Ozone vs. Temperature)
+par(mar = c(5, 4, 4, 4) + 0.3)  # Adjust margins for second axis
+
+plot(ozone_temp_pm_full$date, ozone_temp_pm_full$mean_o3, 
+     type = "l", col = "black", lwd = 2, 
+     xlab = "Date", ylab = "Ozone (ppb)", 
+     ylim = c(min(ozone_temp_pm_full$mean_o3, na.rm = TRUE), 
+              max(ozone_temp_pm_full$mean_o3, na.rm = TRUE)))
+
+par(new = TRUE)  # Allow a second plot overlaid
+
+plot(ozone_temp_pm_full$date, ozone_temp_pm_full$mean_temp, 
+     type = "l", col = "red", lwd = 2, 
+     axes = FALSE, xlab = "", ylab = "", 
+     ylim = c(min(ozone_temp_pm_full$mean_temp, na.rm = TRUE), 
+              max(ozone_temp_pm_full$mean_temp, na.rm = TRUE)))
+
+axis(side = 4, col.axis = "red")  # Make Temperature y-axis text red
+mtext("Temperature (°C)", side = 4, line = 3, col = "red")  # Label right y-axis
+
+title("Ozone and Temperature Time Series")
+
+
+
+
+# Base R plot with dual y-axes (Ozone vs. PM2.5)
+par(mar = c(5, 4, 4, 4) + 0.3)  # Adjust margins for second axis
+
+plot(ozone_temp_pm_full$date, ozone_temp_pm_full$mean_o3, 
+     type = "l", col = "black", lwd = 2, 
+     xlab = "Date", ylab = "Ozone (ppb)", 
+     ylim = c(min(ozone_temp_pm_full$mean_o3, na.rm = TRUE), 
+              max(ozone_temp_pm_full$mean_o3, na.rm = TRUE)))
+
+par(new = TRUE)  # Allow a second plot overlaid
+
+plot(ozone_temp_pm_full$date, ozone_temp_pm_full$mean_pm25, 
+     type = "l", col = "#2259e3", lwd = 2, 
+     axes = FALSE, xlab = "", ylab = "", 
+     ylim = c(min(ozone_temp_pm_full$mean_pm25, na.rm = TRUE), 
+              max(ozone_temp_pm_full$mean_pm25, na.rm = TRUE)))
+
+axis(side = 4, col.axis = "#2259e3")  # Make PM2.5 y-axis text green
+mtext("PM2.5 (µg/m³)", side = 4, line = 3, col = "#2259e3")  # Label right y-axis
+
+title("Ozone and PM2.5 Time Series")  # Add title
+
+```
+
+## Splitting by hour for each season 
+
+```{r}
+## DURING HARMATTAN ----
+o3_hourly_harmattan <- o3_community_hourly %>%
+  filter(date > harmattan_start,
+         date < harmattan_end) %>%
+  group_by(hour) %>%
+  summarise(mean_o3 = mean(mean_o3, na.rm = TRUE))
+
+pm25_hourly_harmattan <- pm25_community_hourly %>%
+  filter(date > harmattan_start,
+         date < harmattan_end) %>%
+  group_by(hour) %>%
+  summarise(mean_pm25 = mean(mean_pm25, na.rm = TRUE))
+
+temp_hourly_harmattan <- temp_community_hourly %>%
+  filter(date > harmattan_start,
+         date < harmattan_end) %>%
+  group_by(hour) %>%
+  summarise(mean_temp = mean(mean_met_temp, na.rm = TRUE))
+  
+hourly_harmattan_measures <- o3_hourly_harmattan %>% left_join(pm25_hourly_harmattan) %>% left_join(temp_hourly_harmattan)
+
+# Base R plot with dual y-axes (Ozone vs. Temperature)
+par(mar = c(5, 4, 4, 4) + 0.3)  # Adjust margins for second axis
+
+plot(hourly_harmattan_measures$hour, hourly_harmattan_measures$mean_o3, 
+     type = "l", col = "black", lwd = 2, 
+     xlab = "Date", ylab = "Ozone (ppb)", 
+     ylim = c(min(hourly_harmattan_measures$mean_o3, na.rm = TRUE), 
+              max(hourly_harmattan_measures$mean_o3, na.rm = TRUE)))
+
+par(new = TRUE)  # Allow a second plot overlaid
+
+plot(hourly_harmattan_measures$hour, hourly_harmattan_measures$mean_temp, 
+     type = "l", col = "red", lwd = 2, 
+     axes = FALSE, xlab = "", ylab = "", 
+     ylim = c(min(hourly_harmattan_measures$mean_temp, na.rm = TRUE), 
+              max(hourly_harmattan_measures$mean_temp, na.rm = TRUE)))
+
+axis(side = 4, col.axis = "red")  # Make Temperature y-axis text red
+mtext("Temperature (°C)", side = 4, line = 3, col = "red")  # Label right y-axis
+
+title("Hourly Ozone and Temperature During Harmattan")
+
+
+
+
+# Base R plot with dual y-axes (Ozone vs. Temperature)
+par(mar = c(5, 4, 4, 4) + 0.3)  # Adjust margins for second axis
+
+plot(hourly_harmattan_measures$hour, hourly_harmattan_measures$mean_o3, 
+     type = "l", col = "black", lwd = 2, 
+     xlab = "Date", ylab = "Ozone (ppb)", 
+     ylim = c(min(hourly_harmattan_measures$mean_o3, na.rm = TRUE), 
+              max(hourly_harmattan_measures$mean_o3, na.rm = TRUE)))
+
+par(new = TRUE)  # Allow a second plot overlaid
+
+plot(hourly_harmattan_measures$hour, hourly_harmattan_measures$mean_pm25, 
+     type = "l", col = "#2259e3", lwd = 2, 
+     axes = FALSE, xlab = "", ylab = "", 
+     ylim = c(min(hourly_harmattan_measures$mean_pm25, na.rm = TRUE), 
+              max(hourly_harmattan_measures$mean_pm25, na.rm = TRUE)))
+
+axis(side = 4, col.axis = "#2259e3")  # Make Temperature y-axis text red
+mtext("PM2.5 (µg/m³)", side = 4, line = 3, col = "#2259e3")  # Label right y-axis
+
+title("Hourly Ozone and PM 2.5 During Harmattan")
+
+
+
+
+
+
+
+
+  ## OUTSIDE OF HARMATTAN ----
+o3_hourly_not_harmattan <- o3_community_hourly %>%
+  filter(date < harmattan_start | date > harmattan_end) %>%
+  group_by(hour) %>%
+  summarise(mean_o3 = mean(mean_o3, na.rm = TRUE))
+
+pm25_hourly_not_harmattan<- pm25_community_hourly %>%
+  filter(date < harmattan_start | date > harmattan_end) %>%
+  group_by(hour) %>%
+  summarise(mean_pm25 = mean(mean_pm25, na.rm = TRUE))
+
+temp_hourly_not_harmattan <- temp_community_hourly %>%
+  filter(date < harmattan_start | date > harmattan_end) %>%
+  group_by(hour) %>%
+  summarise(mean_temp = mean(mean_met_temp, na.rm = TRUE))
+
+hourly_not_harmattan_measures <- o3_hourly_not_harmattan %>% left_join(pm25_hourly_not_harmattan) %>% left_join(temp_hourly_not_harmattan)
+
+
+
+
+# Base R plot with dual y-axes (Ozone vs. Temperature)
+par(mar = c(5, 4, 4, 4) + 0.3)  # Adjust margins for second axis
+
+plot(hourly_not_harmattan_measures$hour, hourly_not_harmattan_measures$mean_o3, 
+     type = "l", col = "black", lwd = 2, 
+     xlab = "Date", ylab = "Ozone (ppb)", 
+     ylim = c(min(hourly_not_harmattan_measures$mean_o3, na.rm = TRUE), 
+              max(hourly_not_harmattan_measures$mean_o3, na.rm = TRUE)))
+
+par(new = TRUE)  # Allow a second plot overlaid
+
+plot(hourly_not_harmattan_measures$hour, hourly_not_harmattan_measures$mean_temp, 
+     type = "l", col = "red", lwd = 2, 
+     axes = FALSE, xlab = "", ylab = "", 
+     ylim = c(min(hourly_not_harmattan_measures$mean_temp, na.rm = TRUE), 
+              max(hourly_not_harmattan_measures$mean_temp, na.rm = TRUE)))
+
+axis(side = 4, col.axis = "red")  # Make Temperature y-axis text red
+mtext("Temperature (°C)", side = 4, line = 3, col = "red")  # Label right y-axis
+
+title("Hourly Ozone and Temperature Outside of Harmattan")
+
+
+# Base R plot with dual y-axes (Ozone vs. Temperature)
+par(mar = c(5, 4, 4, 4) + 0.3)  # Adjust margins for second axis
+
+plot(hourly_not_harmattan_measures$hour, hourly_not_harmattan_measures$mean_o3, 
+     type = "l", col = "black", lwd = 2, 
+     xlab = "Date", ylab = "Ozone (ppb)", 
+     ylim = c(min(hourly_not_harmattan_measures$mean_o3, na.rm = TRUE), 
+              max(hourly_not_harmattan_measures$mean_o3, na.rm = TRUE)))
+
+par(new = TRUE)  # Allow a second plot overlaid
+
+plot(hourly_not_harmattan_measures$hour, hourly_not_harmattan_measures$mean_pm25, 
+     type = "l", col = "#2259e3", lwd = 2, 
+     axes = FALSE, xlab = "", ylab = "", 
+     ylim = c(min(hourly_not_harmattan_measures$mean_pm25, na.rm = TRUE), 
+              max(hourly_not_harmattan_measures$mean_pm25, na.rm = TRUE)))
+
+axis(side = 4, col.axis = "#2259e3")  # Make Temperature y-axis text red
+mtext("PM2.5 (µg/m³)", side = 4, line = 3, col = "#2259e3")  # Label right y-axis
+
+title("Hourly Ozone and PM 2.5 Outside of Harmattan")
+
+```
+
