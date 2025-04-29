@@ -5,7 +5,7 @@ This repository contains scripts, data, and a Shiny dashboard related to the ana
 ## Project Structure
 - `analysis/` – Analysis scripts and outputs (e.g., trends, completeness)
 - `archive/` – Archived reports, scripts, and older datasets
-- `air_pollution_dashboard/` – Shiny dashboard application
+- `air_pollution_dashboard/` – Shiny dashboard application: https://cumc-columbia-air-pollution-dashboard.shinyapps.io/cumc-air-pollution-dashboard/
 - `data/` – Organized raw and processed datasets
 - `data_load_and_prep/` – Scripts for data cleaning and preparation
 - `plots/` – Figures and visualizations
