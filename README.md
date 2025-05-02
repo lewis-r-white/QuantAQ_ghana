@@ -125,3 +125,5 @@ These merged datasets are saved to:
 - /data/pm/raw/ for particulate matter (PM1, PM2.5, PM10)
 - /data/gas/raw/ for gaseous pollutants (CO, NO, NO2, O3)
 - /data/weather/merged/ for environmental variables (temp, RH, wind)
+
+For the pollutants (PMs and gases), the merged data is then passed to calibration functions (see Section 3 below).
