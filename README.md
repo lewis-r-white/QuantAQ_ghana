@@ -73,7 +73,7 @@ QuantAQ will return cleaned `.csv` files, one per device. Each `.csv` is named u
 - Automatic parsing of monitor names from file paths
 - Standardization of column names to align with cloud data
 
-This ensures cloud and SD card data can be merged consistently for downstream analysis.
+This ensures cloud and SD card data can be merged consistently for analysis.
 
 
 ## 2. Merging Cloud and SD Card Data (PM, Gas, and Weather)
@@ -113,7 +113,7 @@ For each pollutant or weather variable (e.g., `pm25`, `co`, `temp`, etc.):
   Joins SD card data to cloud data by timestamp and monitor ID. Uses `coalesce()` to prefer cloud values and fills gaps using SD card data.
 
 - `merge_cloud_sd_colocation_and_community()`  
-  Applies the merging logic above across multiple pollutants, returning a structured list for downstream analysis.
+  Applies the merging logic above across multiple pollutants, returning a structured list for analysis.
 
 ### Output Format
 Each pollutant gets a named list of merged dataframes, such as:
@@ -223,7 +223,7 @@ This dataset includes geospatial and contextual information for each QuantAQ mon
    The final dataset combines monitor names, location coordinates, spatial metadata, and population information into a single CSV file:  
    `data/monitor_community_info.csv`
 
-This reference file is used in downstream analyses for spatial mapping, clustering, and aggregating pollution data by community.
+This reference file is used in analyses for spatial mapping, clustering, and aggregating pollution data by community.
 
 # 5. Analysis 
 
