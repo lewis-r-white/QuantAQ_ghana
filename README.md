@@ -150,7 +150,7 @@ For particulate matter (PM1, PM2.5, PM10), calibration is based on colocation da
    Only include timestamps where at least 10 monitors were active, to ensure stability of the fleet average.
 
 4. **Run Regressions**  
-   For each monitor, run a linear regression comparing its readings to the fleet average. Store the slope, intercept, RMSE, and MAE.
+   For each monitor, run a linear regression comparing its readings to the fleet average. Store the slope, intercept, RMSE, and MAE. The function `apply_regression()` in [`compare_fleet_regression`](https://github.com/lewis-r-white/QuantAQ/blob/main/src/compare_fleet_regression.R) facilitates this. 
 
 5. **Apply Correction**  
    Use the regression equation to adjust each monitor’s community deployment readings:
