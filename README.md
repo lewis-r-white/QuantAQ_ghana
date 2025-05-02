@@ -157,7 +157,7 @@ For particulate matter (PM1, PM2.5, PM10), calibration is based on colocation da
    - Corrected Value = (Raw Value - Intercept)/Slope
 
 6. **Summarize Output**  
-   Save both hourly and daily summaries for corrected values.
+   Use [`summarize_pollution_times.R`](https://github.com/lewis-r-white/QuantAQ/blob/main/src/summarize_pollution_times.R) to summarize hourly and daily measurements. Save both hourly and daily summaries for corrected values.
 
 **Output:**
 - Corrected datasets saved to `/data/pm/final/`
@@ -171,11 +171,11 @@ Gas-phase pollutants (CO, NO, NO₂, O₃) require a modified approach due to:
 
 **Steps:**
 
-1. **Select a Golden Monitor**  
-   The monitor with the most stable measurements and high correlations with others (e.g., `MOD-00397`) is used as a reference.
-
-2. **Plot Correlations**  
+1. **Plot Correlations**  
    Create pairwise correlation plots and time series to assess monitor consistency during the colocation period.
+
+2. **Select a Golden Monitor**  
+   The monitor with the most stable measurements and high correlations with others (e.g., `MOD-00397`) is used as a reference.
 
 3. **Run Regressions**  
    For each monitor and gas, regress observed values against the golden monitor’s values for the same timestamp.
@@ -184,8 +184,8 @@ Gas-phase pollutants (CO, NO, NO₂, O₃) require a modified approach due to:
    Use each monitor’s regression coefficients to adjust gas values for the community deployment period (post-colocation):
    - Corrected Gas = (Raw Gas - Intercept)/Slope
 
-6. **Summarize Output**  
-   Save both hourly and daily summaries of corrected gas values.
+5. **Summarize Output**  
+   Use [`summarize_pollution_times.R`](https://github.com/lewis-r-white/QuantAQ/blob/main/src/summarize_pollution_times.R) to summarize hourly and daily measurements. Save both hourly and daily summaries of corrected gas values.
 
 **Output:**
 - Corrected datasets saved to `/data/gas/final/`
