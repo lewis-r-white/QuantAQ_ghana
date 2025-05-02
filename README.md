@@ -14,7 +14,7 @@ This repository contains scripts, datasets, and a Shiny dashboard related to air
 - `src/` – Functions used in cleaning, merging, and analysis
 - `QuantAQ.Rproj` – RStudio project file
 
-The sections below describe the workflow used to **load, clean, and analyze** air quality data from QuantAQ **MODULAIR** and **MODULAIR-PM** devices.
+The sections below describe the workflow used to **load, clean, and analyze** air quality data from QuantAQ MODULAIR and MODULAIR-PM devices.
 
 ---
 
