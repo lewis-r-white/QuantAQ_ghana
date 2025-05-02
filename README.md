@@ -79,8 +79,8 @@ This ensures cloud and SD card data can be merged consistently for downstream an
 ## 2. Merging Cloud and SD Card Data (PM, Gas, and Weather)
 
 ### Key files: 
-- [`pollutant_data_cleaning.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/pollutant_data_cleaning.Rmd)
-- [`weather_data_cleaning.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/weather_data_cleaning.Rmd)
+### - [`pollutant_data_cleaning.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/pollutant_data_cleaning.Rmd)
+### - [`weather_data_cleaning.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/weather_data_cleaning.Rmd)
 
 Once the cloud and SD card datasets are loaded, they are merged to create a complete time series per monitor. This ensures data continuity even during periods when cloud data is missing due to connectivity issues or device syncing delays.
 
