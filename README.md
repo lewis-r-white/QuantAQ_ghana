@@ -234,8 +234,8 @@ This reference file is used in downstream analyses for spatial mapping, clusteri
 - [`cloud_vs_sd_completeness.R`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/data_completeness/cloud_vs_sd_completeness.R): Compares SD card vs. cloud data availability, generates completeness heatmaps, and builds summary tables.
 - [`gas_pm_completeness.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/data_completeness/gas_pm_completeness.Rmd): Examines MOD device pollutant-specific availability (PM1, PM2.5, CO, NO, NO2, O3) across weekly/monthly intervals.
   
-- [`data/missingness/sd_time_data_20230815-20250129.rds`]: Pre-processed timestamp-only SD card data used to estimate completeness at the hourly and daily level.
-- [`data/pm/final/pm25corrected_20231024-20240816.rds`]: Merged and corrected PM2.5 dataset used to assess recovery rates during Harmattan and non-Harmattan seasons.
+- `data/missingness/sd_time_data_20230815-20250129.rds`: Pre-processed timestamp-only SD card data used to estimate completeness at the hourly and daily level.
+- `data/pm/final/pm25corrected_20231024-20240816.rds`: Merged and corrected PM2.5 dataset used to assess recovery rates during Harmattan and non-Harmattan seasons.
 
 **Description:**
 
@@ -243,15 +243,18 @@ This section quantifies and visualizes the availability of data collected by the
 - **Completeness thresholds** are based on:
   - ≥45 minutes of data = 1 complete hour
   - ≥12 hours = 1 complete day
-- **Weekly heatmaps** visualize completeness per monitor across the study period (Aug 2023 – Oct 2024), separately for SD card, cloud, and combined data.
-- **Summary tables** quantify:
+- **Visualizations**:
+  - Weekly completeness heatmaps for SD, cloud, and merged data.
+  - Spatial recovery maps of data completeness per monitor.
+  - Harmattan vs. non-Harmattan plots for seasonal diagnostics.   
+- **Summary tables**:
   - Earliest and latest dates with available data per source
   - Total hours and days of data recorded
   - Percent missing and recovered per monitor
-- **Seasonal analysis** compares completeness during Harmattan (Dec–Mar) vs. the rest of the year.
-  - Includes stacked bar plots of cloud vs. SD card contributions
-  - Calculates Harmattan-to-non-Harmattan recovery ratios
-- **Spatial completeness maps** display monitor-level recovery rates across the region to identify geographic gaps in data.
+- **Additional analysis** 
+  - Stacked bar plots of cloud vs. SD contributions.
+  - Ratio plots of Harmattan to non-Harmattan completeness.
+  - Wilcoxon tests on paired completeness metrics.
 
 These diagnostics highlight the need to merge cloud and SD card data.
 
