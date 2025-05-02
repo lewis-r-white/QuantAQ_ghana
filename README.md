@@ -37,7 +37,7 @@ To download data directly from the QuantAQ cloud:
 - A valid API key (generate under `Developer > API Keys` on the QuantAQ dashboard)
 - Access to the specific devices you want to query
 
-#### Workflow Steps (in load_ghana_AQ_data.Rmd)
+#### Workflow Steps (in `load_ghana_AQ_data.Rmd`)
 
 1. Load necessary packages (e.g., `QuantAQAPIClient`, `purrr`, `lubridate`, etc.)
 2. Run `setup_client()` and enter your API key when prompted
