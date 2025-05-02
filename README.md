@@ -20,7 +20,7 @@ The sections below describe the workflow used to **load, clean, and analyze** ai
 
 ## Data Access and Setup
 
-### Key file: `load_ghana_AQ_data.Rmd`
+### Key file: [`load_ghana_AQ_data.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/load_ghana_AQ_data.Rmd)
 
 This script walks through the process of loading and preparing data from:
 
