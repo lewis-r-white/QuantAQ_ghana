@@ -37,7 +37,7 @@ To download data directly from the QuantAQ cloud:
 - A valid API key (generate under `Developer > API Keys` on the QuantAQ dashboard)
 - Access to the specific devices you want to query
 
-#### Workflow Steps
+#### Workflow Steps (in load_ghana_AQ_data.Rmd)
 
 1. Load necessary packages (e.g., `QuantAQAPIClient`, `purrr`, `lubridate`, etc.)
 2. Run `setup_client()` and enter your API key when prompted
@@ -67,7 +67,7 @@ QuantAQ will return cleaned `.csv` files, one per device. Each `.csv` is named u
 - /data/all_measurements/sd/processed_<DATE>/MOD
 - /data/all_measurements/sd/processed_<DATE>/MOD-PM
 
-The script `load_ghana_AQ_data.Rmd` includes:
+The file `load_ghana_AQ_data.Rmd` includes:
 
 - Functions to extract `timestamp_iso`, pollutant concentrations, and metadata
 - Automatic parsing of monitor names from file paths
