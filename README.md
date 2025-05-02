@@ -1,61 +1,76 @@
 # QuantAQ Air Quality Data Analysis and Dashboard
 
-This repository contains scripts, data, and a Shiny dashboard related to the analysis of air quality data collected with QuantAQ devices across Ghana and other locations.
+This repository contains scripts, datasets, and a Shiny dashboard related to air quality monitoring using QuantAQ devices across the Bono East region of Ghana.
 
 ## Project Structure
+
 - `analysis/` – Analysis scripts and outputs (e.g., trends, completeness)
-- `archive/` – Archived reports, scripts, and older datasets
-- `air_pollution_dashboard/` – Shiny dashboard application: https://cumc-columbia-air-pollution-dashboard.shinyapps.io/cumc-air-pollution-dashboard/
-- `data/` – Organized raw and processed datasets
-- `data_load_and_prep/` – Scripts for data cleaning and preparation
-- `plots/` – Figures and visualizations
-- `src/` – Core functions and utilities
+- `archive/` – Archived reports, scripts, and earlier datasets
+- `air_pollution_dashboard/` – Shiny dashboard app:  
+  [View Dashboard](https://cumc-columbia-air-pollution-dashboard.shinyapps.io/cumc-air-pollution-dashboard/)
+- `data/` – Raw, processed, and summarized datasets
+- `data_load_and_prep/` – Scripts for data ingestion and cleaning
+- `plots/` – Figures used in reports and visualizations
+- `src/` – Functions used in cleaning, merging, and analysis
 - `QuantAQ.Rproj` – RStudio project file
 
-## Repository Components
+The sections below describe the workflow used to **load, clean, and analyze** air quality data from QuantAQ **MODULAIR** and **MODULAIR-PM** devices.
 
-### 1. Analysis
-Contains R scripts and output files for:
-- **Data Completeness** analysis comparing SD card and cloud sources
-- **Pollution Trends** (e.g., seasonal patterns, Harmattan effects)
+---
 
-### 2. Air Pollution Dashboard
-An interactive Shiny dashboard for visualizing:
-- Time series of pollution readings
-- Monitor-level comparisons
-- Fleet-wide averages
-- Correlations between pollutants
+## Data Access and Setup
 
-Dashboard located at:  
-`air_pollution_dashboard/app/`  
-Deployment details in:  
-`air_pollution_dashboard/app/rsconnect/`
+### Key file: `load_ghana_AQ_data.Rmd`
 
-### 3. Data
-Raw and processed datasets, organized into:
-- `pm/` — Particulate matter (PM1, PM2.5, PM10)
-- `gas/` — Gaseous pollutants (CO, NO, NO2, O3)
-- `weather/` — Temperature, humidity, wind data
-- `spatial/` — Ghana shapefiles and road network layers
-- `missingness/` — Metadata tracking missing data over time
+This script walks through the process of loading and preparing data from:
 
-> ⚡ **Note:** Data is stored securely offline.
+- QuantAQ's **cloud-based API**
+- **SD card exports** processed by the QuantAQ team
 
-### 4. Data Load and Preparation
-Scripts for:
-- Loading datasets from Box/other cloud storage
-- Cleaning BAM reference monitor data
-- Processing temperature, humidity, and wind sensor data
+### Loading Cloud Data via API
 
-### 5. Plots
-Saved figures for reports and presentations:
-- `pm_plots/` — PM trends and maps
-- `gas_plots/` — Gas concentration visualizations
-- `wind_plots/` — Wind rose plots
+To download data directly from the QuantAQ cloud:
 
-### 6. Source Code (`src/`)
-Functions for:
-- Merging cloud and SD card data
-- Creating spatial plots
-- Running regressions with road density and pollution
-- Summarizing pollution times and completeness
+#### Requirements
+
+- A QuantAQ account with **developer access**
+- A valid **API key** (generate under `Developer > API Keys` on the QuantAQ dashboard)
+- Access to the specific devices you want to query
+
+#### Workflow Steps
+
+1. Load necessary packages (e.g., `QuantAQAPIClient`, `purrr`, `lubridate`, etc.)
+2. Run `setup_client()` and enter your API key when prompted
+3. Create a list of device serial numbers (e.g., `"MOD-00397"`, `"MOD-PM-00893"`)
+4. Define the start and end dates for the download
+5. Use a loop to download minutely data for each day and each device
+6. The script standardizes timestamps, adds metadata (`monitor`, `date`, `hour`), and merges all data into a single file
+
+#### Output
+
+Saved output files follow this format: /data/all_measurements/cloud/ghana_AQ_parent_full_YYYYMMDD-YYYYMMDD.csv
+
+### Loading SD Card Data
+
+Before use, raw SD card files must be processed by QuantAQ. This ensures formatting is consistent with cloud data (i.e., aligned to minutely intervals).
+
+#### Preparing Data for Upload
+
+1. Create a subfolder for each monitor using the serial number as the folder name (e.g., `MOD-00397`)
+2. Place all raw `.csv` files from that device's SD card into the subfolder
+3. Zip the folder containing all monitor subfolders into a single `.zip` file
+4. Open a support ticket with QuantAQ and upload the `.zip` for processing
+
+#### Processed Output
+
+QuantAQ will return cleaned `.csv` files, one per device. Each `.csv` is named using the monitor ID, e.g., `MOD-00397.final.csv`. Place these files into: 
+- /data/all_measurements/sd/processed_<DATE>/MOD
+- /data/all_measurements/sd/processed_<DATE>/MOD-PM
+
+The script `load_ghana_AQ_data.Rmd` includes:
+
+- Functions to extract `timestamp_iso`, pollutant concentrations, and metadata
+- Automatic parsing of monitor names from file paths
+- Standardization of column names to align with cloud data
+
+This ensures cloud and SD card data can be merged consistently for downstream analysis.
