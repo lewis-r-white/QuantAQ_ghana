@@ -195,3 +195,35 @@ Gas-phase pollutants (CO, NO, NO₂, O₃) require a modified approach due to:
 The gas correction step assigns NA slope/intercept values for monitors where the regression could not be calculated (e.g., too few points). 
 
 All calibration scripts are implemented in `pollutant_data_prep.Rmd`. The code that goes through the calibration is immediately after loading and merging the raw datasets. This file sources `compare_fleet_regression.R` and `summarize_pollution_times.R`, and outputs analysis-ready data for subsequent visualization and modeling.
+
+
+## 4. Monitor Metadata and Community Information
+
+Key file: `monitor_community_info.csv` (Note: for privacy, no data is shared in this repository)
+
+This dataset includes geospatial and contextual information for each QuantAQ monitor, including:
+
+- Monitor serial number and type (MOD or MOD-PM)
+- Community/village name and location
+- Coordinates (latitude/longitude)
+- Estimated population and household count
+
+### Steps to Create `monitor_community_info.csv`:
+
+1. **Extract Recent Coordinates**:  
+   Coordinates were extracted from cloud data after March 2024, filtered for completeness and deduplicated per device. Some corrections were made manually to fix GPS errors in longitude.
+
+2. **Integrate Population Data**:  
+   Population and household counts were imported from KHRC's `modulair_communities.xlsx`. Community names were cleaned and standardized to match monitor locations (e.g., "Korawura Akura" → "Kurawura Akura").
+
+3. **Assign Location Descriptions**:  
+   Descriptive names and village-level locations were assigned to each monitor based on field records.
+
+4. **Create a Master Reference Table**:  
+   The final dataset combines monitor names, location coordinates, spatial metadata, and population information into a single CSV file:  
+   `data/monitor_community_info.csv`
+
+This reference file is used in downstream analyses for spatial mapping, clustering, and aggregating pollution data by community.
+
+
+
