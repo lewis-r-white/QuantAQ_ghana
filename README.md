@@ -24,8 +24,8 @@ The sections below describe the workflow used to **load, clean, and analyze** ai
 
 This script walks through the process of loading and preparing data from:
 
-- QuantAQ's **cloud-based API**
-- **SD card exports** processed by the QuantAQ team
+- QuantAQ's loud-based API
+- SD card exports processed by the QuantAQ team
 
 ### Loading Cloud Data via API
 
@@ -33,8 +33,8 @@ To download data directly from the QuantAQ cloud:
 
 #### Requirements
 
-- A QuantAQ account with **developer access**
-- A valid **API key** (generate under `Developer > API Keys` on the QuantAQ dashboard)
+- A QuantAQ account with developer access
+- A valid API key (generate under `Developer > API Keys` on the QuantAQ dashboard)
 - Access to the specific devices you want to query
 
 #### Workflow Steps
