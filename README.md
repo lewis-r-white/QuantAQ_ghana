@@ -178,7 +178,7 @@ Gas-phase pollutants (CO, NO, NO₂, O₃) require a modified approach due to:
    The monitor with the most stable measurements and high correlations with others (e.g., `MOD-00397`) is used as a reference.
 
 3. **Run Regressions**  
-   For each monitor and gas, regress observed values against the golden monitor’s values for the same timestamp.
+   For each monitor and gas, regress observed values against the golden monitor’s values for the same timestamp. Within `pollutant_data_cleaning.Rmd`, the function `get_gas_regression_results` is created to facilitate this. 
 
 4. **Apply Correction**  
    Use each monitor’s regression coefficients to adjust gas values for the community deployment period (post-colocation):
