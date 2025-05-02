@@ -127,3 +127,71 @@ These merged datasets are saved to:
 - /data/weather/merged/ for environmental variables (temp, RH, wind)
 
 For the pollutants (PMs and gases), the merged data is then passed to calibration functions (see Section 3 below).
+
+## 3. Calibration and Correction of Pollutant Measurements
+
+### Key file: [`pollutant_data_cleaning.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/pollutant_data_cleaning.Rmd)
+
+After merging cloud and SD card data (Section 2), calibration is applied to correct for systematic biases across monitors. **Note**: The approach differs for PM and gas measurements.
+
+### PM Calibration: Colocation-Based Regression
+
+For particulate matter (PM1, PM2.5, PM10), calibration is based on colocation data collected when all monitors were stationed together.
+
+**Steps:**
+
+1. **Select Colocation Data**  
+   Filter data to the colocation period (e.g., `2023-08-16` to `2023-09-20`) using `merged_results$<pollutant>$merged_colocation`.
+
+2. **Calculate Fleet Average**  
+   For each timestamp, compute the average value across all active monitors.
+
+3. **Filter Timestamps**  
+   Only include timestamps where at least 10 monitors were active, to ensure stability of the fleet average.
+
+4. **Run Regressions**  
+   For each monitor, run a linear regression comparing its readings to the fleet average. Store the slope, intercept, RMSE, and MAE.
+
+5. **Apply Correction**  
+   Use the regression equation to adjust each monitor’s community deployment readings:
+   - Corrected Value = (Raw Value - Intercept)/Slope
+
+6. **Summarize Output**  
+   Save both hourly and daily summaries for corrected values.
+
+**Output:**
+- Corrected datasets saved to `/data/pm/final/`
+- Summarized hourly and daily datasets saved to `/data/pm/summarized/`
+
+### Gas Calibration: Golden Monitor-Based Regression
+
+Gas-phase pollutants (CO, NO, NO₂, O₃) require a modified approach due to:
+- Fewer colocated devices
+- Inconsistent or unusual readings from certain monitors
+
+**Steps:**
+
+1. **Select a Golden Monitor**  
+   The monitor with the most stable measurements and high correlations with others (e.g., `MOD-00397`) is used as a reference.
+
+2. **Plot Correlations**  
+   Create pairwise correlation plots and time series to assess monitor consistency during the colocation period.
+
+3. **Run Regressions**  
+   For each monitor and gas, regress observed values against the golden monitor’s values for the same timestamp.
+
+4. **Apply Correction**  
+   Use each monitor’s regression coefficients to adjust gas values for the community deployment period (post-colocation):
+   - Corrected Gas = (Raw Gas - Intercept)/Slope
+
+6. **Summarize Output**  
+   Save both hourly and daily summaries of corrected gas values.
+
+**Output:**
+- Corrected datasets saved to `/data/gas/final/`
+- Summarized hourly and daily datasets saved to `/data/gas/summarized/`
+
+**Note:**  
+The gas correction step assigns NA slope/intercept values for monitors where the regression could not be calculated (e.g., too few points). 
+
+All calibration scripts are implemented in `pollutant_data_prep.Rmd`. The code that goes through the calibration is immediately after loading and merging the raw datasets. This file sources `compare_fleet_regression.R` and `summarize_pollution_times.R`, and outputs analysis-ready data for subsequent visualization and modeling.
