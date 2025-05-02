@@ -74,3 +74,54 @@ The script `load_ghana_AQ_data.Rmd` includes:
 - Standardization of column names to align with cloud data
 
 This ensures cloud and SD card data can be merged consistently for downstream analysis.
+
+
+## 2. Merging Cloud and SD Card Data (PM, Gas, and Weather)
+
+### Key files: 
+- [`pollutant_data_cleaning.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/pollutant_data_cleaning.Rmd)
+- [`weather_data_cleaning.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/weather_data_cleaning.Rmd)
+
+Once the cloud and SD card datasets are loaded, they are merged to create a complete time series per monitor. This ensures data continuity even during periods when cloud data is missing due to connectivity issues or device syncing delays.
+
+### Workflow Overview
+
+For each pollutant or weather variable (e.g., `pm25`, `co`, `temp`, etc.):
+
+1. Cloud data is loaded and split into:
+   - Colocation period (e.g., `2023-08-16` to `2023-09-20`)
+   - Community deployment period (e.g., `2023-09-26` onward)
+
+2. SD card data is loaded (see section 1).
+
+3. Cloud and SD card data are merged using the `merge_cloud_sd_colocation_and_community()` function:
+   - If cloud data is present, it is prioritized.
+   - If cloud data is missing, the corresponding SD card value is used.
+   - A `source` column is used to track whether each value came from `cloud` or `sd_card`.
+
+4. The result is a list of merged dataframes per pollutant:
+   - `merged_full`: all time periods
+   - `merged_colocation`: colocated calibration period only
+   - `merged_community`: community deployment period only
+
+### Key Functions
+
+- `load_pollution_datasets()`  
+  Loads cloud data from `.csv` or `.rds`, filters extreme values (e.g. PM10 > 1500), and separates it into colocated and community periods.
+
+- `merge_sd_data()`  
+  Joins SD card data to cloud data by timestamp and monitor ID. Uses `coalesce()` to prefer cloud values and fills gaps using SD card data.
+
+- `merge_cloud_sd_colocation_and_community()`  
+  Applies the merging logic above across multiple pollutants, returning a structured list for downstream analysis.
+
+### Output Format
+Each pollutant gets a named list of merged dataframes, such as:
+- merged_results$pm25$merged_full
+- merged_results$pm25$merged_colocation
+- merged_results$pm25$merged_community
+
+These merged datasets are saved to:
+- /data/pm/raw/ for particulate matter (PM1, PM2.5, PM10)
+- /data/gas/raw/ for gaseous pollutants (CO, NO, NO2, O3)
+- /data/weather/merged/ for environmental variables (temp, RH, wind)
