@@ -18,7 +18,7 @@ The sections below describe the workflow used to **load, clean, and analyze** ai
 
 ---
 
-## Data Access and Setup
+## 1. Data Access and Loading Cloud + SD Card Data
 
 ### Key file: [`load_ghana_AQ_data.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/data_load_and_prep/load_ghana_AQ_data.Rmd)
 
