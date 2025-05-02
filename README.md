@@ -67,7 +67,7 @@ QuantAQ will return cleaned `.csv` files, one per device. Each `.csv` is named u
 - /data/all_measurements/sd/processed_<DATE>/MOD
 - /data/all_measurements/sd/processed_<DATE>/MOD-PM
 
-The file `load_ghana_AQ_data.Rmd` includes:
+#### Workflow: The file `load_ghana_AQ_data.Rmd` includes:
 
 - Functions to extract `timestamp_iso`, pollutant concentrations, and metadata
 - Automatic parsing of monitor names from file paths
