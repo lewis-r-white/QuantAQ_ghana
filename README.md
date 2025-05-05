@@ -258,13 +258,42 @@ This section quantifies and visualizes the availability of data collected by the
 
 These diagnostics highlight the need to merge cloud and SD card data.
 
-## 5.2. Measurement Trends 
+## 5.2. Measurement Trends
+
+This section evaluates pollution patterns across time, space, and environmental context using descriptive analyses, spatial mapping, and linear regression models.
+
 **Key Files:**
-- [`ghana_pm_report.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/trends/ghana_pm_report.Rmd): Uses a combination of descriptive plots, regression models, and statistical tests to evaluate variation in pollution across monitors, times of day, and environmental contexts. It performs spatial mapping, visualizes pollution trends over time, compares pollution during cooking hours vs. non-cooking hours, and assesses seasonal differences (particularly Harmattan vs. non-Harmattan). 
-- [`ghana_gas_report.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/trends/ghana_gas_report.Rmd): Similar to PM report, combines descriptive visualizations, spatial mapping, regression comparisons to fleet averages, and statistical tests to explore seasonal, temporal, and locational trends in gaseous pollutant (CO, NO, NO₂, O₃) concentrations. Includes comparisons of pollution during cooking vs. non-cooking hours, and between Harmattan and non-Harmattan seasons.
-- [`create_wind_rose_plots.R`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/trends/create_wind_rose_plots.R): Creates wind rose plots for Modulair devices and compares to local weather station data to test whether monitors are successfully recording wind information.
-- **Data Files**: For the PM and gas reports, summarized data (hourly and daily) is primarily used for the reports. These summarized data files were created and saved in section 3 above.
-- **Outputs**: To get a sense for the analyses and visualizations in these reports, check out the [`plots`](https://github.com/lewis-r-white/QuantAQ/tree/main/plots) section of this repository.  
+
+- [`ghana_pm_report.Rmd`]
+  - Analyzes particulate matter (PM1, PM2.5, PM10) trends.
+  - Includes:
+    - Descriptive plots (e.g., time series, boxplots)
+    - Spatial mapping of monitor readings
+    - Comparisons of pollution during:
+      - Cooking vs. non-cooking hours
+      - Harmattan vs. non-Harmattan seasons
+    - Linear regressions against fleet averages to correct and compare measurements
+    - ANOVA and Tukey HSD tests to assess differences across times and locations
+
+- **`ghana_gas_report.Rmd`**
+  - Examines gaseous pollutants (CO, NO, NO₂, O₃).
+  - Includes:
+    - Descriptive visualizations and spatial trends
+    - Cooking vs. non-cooking hour comparisons
+    - Harmattan vs. non-Harmattan season comparisons
+    - Linear regressions comparing each monitor to the golden monitor
+    - Statistical tests (e.g., Wilcoxon) for significance of observed differences
+
+- **`create_wind_rose_plots.R`**
+  - Creates wind rose plots to visualize wind direction and speed.
+  - Compares Modulair device data to local weather station data.
+  - Helps assess whether devices are reliably capturing wind information.
+
+**Data Used:**
+- Primarily summarized hourly and daily datasets (from Section 3 above). 
+
+**Outputs:**
+- See the [**plots**](https://github.com/lewis-r-white/QuantAQ/tree/main/plots) section of this repository for examples of visual outputs.
 
 
 
