@@ -264,7 +264,7 @@ This section evaluates pollution patterns across time, space, and environmental 
 
 **Key Files:**
 
-- [`ghana_pm_report.Rmd`]
+- [`ghana_pm_report.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/trends/ghana_pm_report.Rmd)
   - Analyzes particulate matter (PM1, PM2.5, PM10) trends.
   - Includes:
     - Descriptive plots (e.g., time series, boxplots)
@@ -275,7 +275,7 @@ This section evaluates pollution patterns across time, space, and environmental 
     - Linear regressions against fleet averages to correct and compare measurements
     - ANOVA and Tukey HSD tests to assess differences across times and locations
 
-- **`ghana_gas_report.Rmd`**
+- [`ghana_gas_report.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/trends/ghana_gas_report.Rmd)
   - Examines gaseous pollutants (CO, NO, NO₂, O₃).
   - Includes:
     - Descriptive visualizations and spatial trends
@@ -284,7 +284,7 @@ This section evaluates pollution patterns across time, space, and environmental 
     - Linear regressions comparing each monitor to the golden monitor
     - Statistical tests (e.g., Wilcoxon) for significance of observed differences
 
-- **`create_wind_rose_plots.R`**
+- [`create_wind_rose_plots.R`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/trends/create_wind_rose_plots.R)
   - Creates wind rose plots to visualize wind direction and speed.
   - Compares Modulair device data to local weather station data.
   - Helps assess whether devices are reliably capturing wind information.
