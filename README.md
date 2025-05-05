@@ -278,11 +278,13 @@ This section evaluates pollution patterns across time, space, and environmental 
 - [`ghana_gas_report.Rmd`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/trends/ghana_gas_report.Rmd)
   - Examines gaseous pollutants (CO, NO, NO₂, O₃).
   - Includes:
-    - Descriptive visualizations and spatial trends
-    - Cooking vs. non-cooking hour comparisons
-    - Harmattan vs. non-Harmattan season comparisons
+    - Descriptive plots (e.g., time series, boxplots)
+    - Spatial mapping of monitor readings
+    - Comparisons of pollution during:
+      - Cooking vs. non-cooking hours
+      - Harmattan vs. non-Harmattan seasons
     - Linear regressions comparing each monitor to the golden monitor
-    - Statistical tests (e.g., Wilcoxon) for significance of observed differences
+    - Statistical tests to assess differences across times and locations
 
 - [`create_wind_rose_plots.R`](https://github.com/lewis-r-white/QuantAQ/blob/main/analysis/trends/create_wind_rose_plots.R)
   - Creates wind rose plots to visualize wind direction and speed.
