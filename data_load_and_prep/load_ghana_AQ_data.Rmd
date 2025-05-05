@@ -147,7 +147,7 @@ final_result_df <- bind_rows(result_combined)
 ```{r}
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -155,7 +155,7 @@ mod_files <- list.files(
 
 # List all MOD-PM files with full path
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/SD_data/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-PM.*\\.csv"
@@ -171,6 +171,7 @@ read_and_select_mod <- function(file) {
     mutate(monitor = monitor_name)
 }
 
+
 # Function to read, select columns, and add monitor name for MOD-PM files
 read_and_select_mod_pm <- function(file) {
   # Extract the monitor name from the file name
@@ -181,6 +182,9 @@ read_and_select_mod_pm <- function(file) {
     mutate(monitor = monitor_name)
 }
 
+
+## LOAD SD CARD DATA ----
+
 # Read all MOD files and combine them
 MOD_sd_card <- mod_files %>%
   map_dfr(read_and_select_mod)
@@ -189,14 +193,11 @@ MOD_sd_card <- mod_files %>%
 MOD_PM_sd_card <- mod_pm_files %>%
   map_dfr(read_and_select_mod_pm)
 
-MOD_PM_sd_card <- MOD_PM_sd_card %>%
-  mutate(co = NA_real_,
-         no = NA_real_,
-         no2 = NA_real_,
-         o3 = NA_real_) %>%
-  select(timestamp_iso, co, no, no2, o3, pm1, pm10, pm25, monitor)
+full_sd_card = bind_rows(MOD_sd_card, MOD_PM_sd_card) %>%
+  filter(pm10 < 5000) 
 
-full_sd_card = rbind(MOD_sd_card, MOD_PM_sd_card)
+# write_csv(full_sd_card, here("data", "all_measurements", "sd", "full_sd_card_2023-04-24_to_2024-09-11.csv")) 
+
 ```
 
 

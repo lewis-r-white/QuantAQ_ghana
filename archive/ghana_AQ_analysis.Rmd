@@ -1404,18 +1404,6 @@ pm10_regression_results$summary_table
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # Gas Trends
 
 ```{r}

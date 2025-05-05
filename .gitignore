@@ -14,3 +14,14 @@
 /data_archive
 
 /src/box_api_client_info.R
+
+# Ignore RStudio temp files
+.RDataTmp*
+.Rhistory
+.RData
+
+# Ignore archive outputs
+*.zip
+archive/archive_reports/
+archive/data_archive/temp_rh/
+
