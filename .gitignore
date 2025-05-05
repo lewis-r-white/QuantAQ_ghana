@@ -25,3 +25,6 @@
 archive/archive_reports/
 archive/data_archive/temp_rh/
 
+#ignore ethiopia work
+/ethiopia_work
+
