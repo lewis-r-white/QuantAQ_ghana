@@ -5,7 +5,7 @@ library(tidyr)
 library(ggplot2)
 
 # Define the base path to your monitors
-base_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/Modulair_Parent_Folder"
+base_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/Modulair_Parent_Folder"
 
 # Get a list of all monitor folders (MOD- folders)
 mod_folders <- list.dirs(base_path, recursive = FALSE, full.names = TRUE)

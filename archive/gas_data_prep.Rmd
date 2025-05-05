@@ -60,7 +60,7 @@ source(here("src", "process_multiple_pollutants.R"))
 
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/SD_data/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -68,7 +68,7 @@ mod_files <- list.files(
 
 # List all MOD-PM files with full path
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/SD_data/MOD-PM", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-PM.*\\.csv"
@@ -116,7 +116,7 @@ pollutants <- c("co", "no", "no2", "o3")
 raw_data <- list()
 
 for (pollutant in pollutants) {
-  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
+  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
   # Store the raw data
   raw_data[[paste0(pollutant, "_raw")]] <- get(paste0(pollutant, "_raw"))
 }

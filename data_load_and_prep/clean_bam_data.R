@@ -3,7 +3,7 @@
 library(tidyverse)
 library(here)
 
-bam_raw = read_csv("/Users/lewiswhite/CHAP_columbia/QuantAQ/data/BAM/bam_raw.csv", skip = 4)
+bam_raw = read_csv("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/BAM/bam_raw.csv", skip = 4)
 
 bam_clean = bam_raw %>% 
   filter(Status == "00000") %>%

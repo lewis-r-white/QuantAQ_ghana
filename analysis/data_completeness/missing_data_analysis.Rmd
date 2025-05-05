@@ -96,7 +96,7 @@ roads_filtered <- st_intersection(roads, bbox_sf)
 # List of pollutants
 pollutants <- c("pm25")
 
-file_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
+file_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
 
 # Load all cloud data in a structured way
 raw_data <- lapply(pollutants, function(pollutant) {

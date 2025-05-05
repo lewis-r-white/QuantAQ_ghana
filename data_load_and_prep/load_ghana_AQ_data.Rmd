@@ -147,7 +147,7 @@ final_result_df <- bind_rows(result_combined)
 ```{r}
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -155,7 +155,7 @@ mod_files <- list.files(
 
 # List all MOD-PM files with full path
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-PM.*\\.csv"

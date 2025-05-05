@@ -68,12 +68,12 @@ When merging the data below, we harmonize these fields into unified temp and rh 
 ## LOAD SD CARD DATA ----
 
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD", 
   full.names = TRUE, pattern = "MOD-00.*\\.csv"
 )
 
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
   full.names = TRUE, pattern = "MOD-PM.*\\.csv"
 )
 
@@ -103,7 +103,7 @@ temp_rh_sd_card <- bind_rows(
 # LOAD THE CLOUD DATA ----
 
 measurements <- c("met_temp", "met_rh")
-cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
+cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
 
 raw_data <- map(measurements, ~ load_pollution_datasets(.x, file_path = cloud_file, file_type = "csv"))
 names(raw_data) <- measurements
@@ -171,7 +171,7 @@ rh_daily <- met_rh_summary$daily
 
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -207,7 +207,7 @@ ws_wd_sd_card <- mod_files %>%
 # LOAD CLOUD DATA
 
 measurements <- c("ws", "wd")
-cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
+cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
 
 raw_data <- map(measurements, ~ load_pollution_datasets(.x, file_path = cloud_file, file_type = "csv"))
 

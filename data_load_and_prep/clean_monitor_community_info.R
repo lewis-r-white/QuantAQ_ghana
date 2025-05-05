@@ -20,7 +20,7 @@ library(kableExtra) # table creation
 location_columns <- c("monitor", "geo_lat", "geo_lon", "date")
 
 # read in the monitor location data using fread to handle large dataset
-location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv", 
+location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv", 
                        select = location_columns, 
                        showProgress = TRUE)
 

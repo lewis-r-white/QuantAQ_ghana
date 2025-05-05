@@ -87,7 +87,7 @@ source(here("src", "calc_gas_regressions.R"))
 location_columns <- c("monitor", "geo_lat", "geo_lon", "date")
 
 # read in the monitor location data using fread to handle large dataset
-location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", 
+location_data <- fread("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/cloud/ghana_AQ_parent_full_20240925.csv", 
                        select = location_columns, 
                        showProgress = TRUE)
 
@@ -303,7 +303,7 @@ results <- list()
 
 # Load and summarize the data for each pollutant
 for (pollutant in pollutants) {
-  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
+  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
   
   colocation_data <- get(paste0(pollutant, "_colocation"))
   community_data <- get(paste0(pollutant, "_community"))
@@ -343,7 +343,7 @@ results <- list()
 
 # Load and summarize the data for each gas
 for (gas in gasses) {
-  load_pollution_datasets(gas, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
+  load_pollution_datasets(gas, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
   
   colocation_data_name <- paste0(gas, "_colocation")
   community_data_name <- paste0(gas, "_community")
@@ -615,7 +615,7 @@ ggplot(monitor_missingness, aes(x = monitor, y = missing_rate)) +
 
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/SD_data/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -623,7 +623,7 @@ mod_files <- list.files(
 
 # List all MOD-PM files with full path
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/SD_data/MOD-PM", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-PM.*\\.csv"
@@ -682,7 +682,7 @@ pollutants <- c("pm1", "pm25", "pm10")
 raw_data <- list()
 
 for (pollutant in pollutants) {
-  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
+  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
   
   # Store the raw data
   raw_data[[paste0(pollutant, "_raw")]] <- get(paste0(pollutant, "_raw"))

@@ -54,8 +54,8 @@ process_folder <- function(folder_path, parent_folder_name) {
 
 
 # Main folder paths
-processed_feb2025 <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_feb_2025"
-processed_oct2024 <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024"
+processed_feb2025 <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_feb_2025"
+processed_oct2024 <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024"
 
 
 

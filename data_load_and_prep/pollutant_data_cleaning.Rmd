@@ -62,7 +62,7 @@ source(here("src", "summarize_pollution_times.R"))
 
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -70,7 +70,7 @@ mod_files <- list.files(
 
 # List all MOD-PM files with full path
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-PM.*\\.csv"
@@ -122,7 +122,7 @@ full_sd_card <- read_csv(here("data", "all_measurements", "sd", "full_sd_card_20
 # List of pollutants
 pollutants <- c("pm1", "pm25", "pm10")
 
-file_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
+file_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
 
 # Load all cloud data in a structured way
 raw_data <- lapply(pollutants, function(pollutant) {
@@ -365,7 +365,7 @@ pm10_community_daily <- summarized_pm10$daily
 
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/sd/processed_oct_2024/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -401,7 +401,7 @@ MOD_gas_sd_card <- read_rds(here("data", "gas","raw", "gas_sd_card_20230423-2024
 
 pollutants <- c("co", "no", "no2", "o3")
 
-cloud_file_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
+cloud_file_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
 
 raw_data <- lapply(pollutants, function(pollutant) {
   full_data <- load_pollution_datasets(pollutant, file_path = cloud_file_path, file_type = "csv")

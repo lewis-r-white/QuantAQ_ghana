@@ -30,7 +30,7 @@ pollutants <- c("ws", "wd")
 raw_data <- list()
 
 for (pollutant in pollutants) {
-  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
+  load_pollution_datasets(pollutant, file_path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/cloud/ghana_AQ_parent_full_20240925.csv", file_type = "csv")
   # Store the raw data
   raw_data[[paste0(pollutant, "_raw")]] <- get(paste0(pollutant, "_raw"))
 }
@@ -41,7 +41,7 @@ for (pollutant in pollutants) {
 
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ/data/SD_data/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/SD_data/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
