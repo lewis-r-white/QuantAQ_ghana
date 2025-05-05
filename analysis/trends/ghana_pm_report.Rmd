@@ -38,12 +38,6 @@ library(kableExtra) # table creation
 ```{r source functions, echo=FALSE, message=FALSE, warning=FALSE}
 # Source in functions
 
-# source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
-source(here("src", "load_pollution_datasets.R"))
-
-# source function that aggregates data by time scale of interest (hourly, daily)
-source(here("src", "summarize_pollution_times.R"))
-
 # Source function that creates fleet average vs monitor pollutant reading plot
 source(here("src", "compare_fleet_avg_monitor.R"))
 
@@ -55,28 +49,6 @@ source(here("src", "generate_spatial_pollution_map.R"))
 
 # source function to calculate moran i 
 source(here("src", "calculate_moran_i.R"))
-
-# source function to prepare data for road regression analysis and plotting
-source(here("src", "prep_monitor_road_data.R"))
-
-# source function to plot map of pollutant levels by location with roads 
-source(here("src", "generate_spatial_pollution_road_map.R"))
-
-# source function to run regression analysis on pollutant / distance to road
-source(here("src", "regress_pollutant_road.R"))
-
-# source function to apply regressions when comparing monitor to fleet average
-source(here("src", "compare_fleet_regression.R"))
-
-# source functions to merge in the SD card data for cases when server data is missing 
-source(here("src", "merge_sd_data.R"))
-source(here("src", "process_multiple_pollutants.R"))
-
-#source functions to create plot that compares individual monitor to golden monitor
-source(here("src", "compare_gas_to_reference_functions.R"))
-
-#source functions to create plot that compares individual monitor to golden monitor
-source(here("src", "calc_gas_regressions.R"))
 ```
 
 

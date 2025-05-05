@@ -36,22 +36,20 @@ library(Metrics)
 library(kableExtra) # table creation
 library(GGally)
 
-
 # source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
 source(here("src", "load_pollution_datasets.R"))
 
-# source function that aggregates data by time scale of interest (hourly, daily)
-source(here("src", "summarize_pollution_times.R"))
+# source functions to merge in the SD card data for cases when server data is missing 
+source(here("src", "merge_sd_data.R"))
 
+# source function that merges cloud/sd card data for for multiple pollutants at once 
+source(here("src", "merge_cloud_sd_colocation_and_community.R"))
 
 # source function to apply regressions when comparing monitor to fleet average
 source(here("src", "compare_fleet_regression.R")) # INCLUDES apply_regression and run_regression_stats functions. 
 
-# source functions to merge in the SD card data for cases when server data is missing 
-source(here("src", "merge_sd_data.R"))
-source(here("src", "process_multiple_pollutants.R"))
-
-source(here("src", "merge_cloud_sd_colocation_and_community.R"))
+# source function that aggregates data by time scale of interest (hourly, daily)
+source(here("src", "summarize_pollution_times.R"))
 ```
 
 
