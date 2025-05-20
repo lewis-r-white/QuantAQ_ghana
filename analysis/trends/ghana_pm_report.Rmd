@@ -210,10 +210,10 @@ pm1_community_hourly <- readRDS(here("data", "pm", "summarized", "pm1_community_
 pm1_community_daily <- readRDS(here("data", "pm", "summarized", "pm1_community_daily_20231024-20240816.rds"))
 
 pm25_community_hourly <- readRDS(here("data", "pm", "summarized", "pm25_community_hourly_20231024-20240816.rds"))
-pm25_community_daily <- readRDS(here("data", "pm", "summarized", "pm25_community_hourly_20231024-20240816.rds"))
+pm25_community_daily <- readRDS(here("data", "pm", "summarized", "pm25_community_daily_20231024-20240816.rds"))
 
 pm10_community_hourly <- readRDS(here("data", "pm", "summarized", "pm10_community_hourly_20231024-20240816.rds"))
-pm10_community_daily <- readRDS(here("data", "pm", "summarized", "pm10_community_hourly_20231024-20240816.rds"))
+pm10_community_daily <- readRDS(here("data", "pm", "summarized", "pm10_community_daily_20231024-20240816.rds"))
 ```
 
 
