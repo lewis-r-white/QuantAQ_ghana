@@ -8,7 +8,7 @@ This repository contains scripts, datasets, and a Shiny dashboard related to air
 - `archive/` – Archived reports, scripts, and earlier datasets
 - `air_pollution_dashboard/` – Shiny dashboard app:  
   [View Dashboard](https://cumc-columbia-air-pollution-dashboard.shinyapps.io/cumc-air-pollution-dashboard/)
-- `data/` – Raw, processed, and summarized datasets
+- `data/` – **Note:** Not included in GitHub, but contains raw, processed, and summarized datasets.
 - `data_load_and_prep/` – Scripts for data ingestion and cleaning
 - `plots/` – Figures used in reports and visualizations
 - `src/` – Functions used in cleaning, merging, and analysis
