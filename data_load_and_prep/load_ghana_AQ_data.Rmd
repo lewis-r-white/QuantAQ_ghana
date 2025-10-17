@@ -30,23 +30,31 @@ setup_client() #log in to QuantAQ account and click developer in the left menu t
 
 
 ## Specify the serial numbers of the devices for which you want to download data
-ghana_devices <- c("MOD-PM-01054", "MOD-PM-00900", "MOD-PM-00876", "MOD-PM-00882", "MOD-PM-00896",
-                   "MOD-PM-00897", "MOD-PM-00892", "MOD-PM-00877", "MOD-PM-01060", "MOD-PM-01055",
-                   "MOD-PM-00884", "MOD-PM-01056", "MOD-PM-01051", "MOD-PM-01059", "MOD-PM-00881",
-                   "MOD-PM-00891", "MOD-PM-00898", "MOD-PM-01052", "MOD-00400", "MOD-PM-00894",
-                   "MOD-PM-01053", "MOD-PM-00887", "MOD-PM-00886", "MOD-PM-00879", "MOD-PM-00890",
-                   "MOD-PM-00889", "MOD-PM-00899", "MOD-PM-00883", "MOD-PM-00895", "MOD-PM-01057",
-                   "MOD-PM-01058", "MOD-PM-00893", "MOD-PM-00878", "MOD-PM-00888", "MOD-PM-00885",
-                   "MOD-00398", "MOD-00401", "MOD-00399", "MOD-00397", "MOD-PM-00880")
+ghana_devices <- c("MOD-00077", "MOD-00397", "MOD-00398", "MOD-00399", "MOD-00400",
+                   "MOD-00401", "MOD-PM-00871", "MOD-PM-00872", "MOD-PM-00876",
+                   "MOD-PM-00877", "MOD-PM-00878", "MOD-PM-00879", "MOD-PM-00880",
+                   "MOD-PM-00881", "MOD-PM-00882", "MOD-PM-00883", "MOD-PM-00884",
+                   "MOD-PM-00885", "MOD-PM-00886", "MOD-PM-00887", "MOD-PM-00888",
+                   "MOD-PM-00889", "MOD-PM-00890", "MOD-PM-00891", "MOD-PM-00892",
+                   "MOD-PM-00893", "MOD-PM-00894", "MOD-PM-00895", "MOD-PM-00896",
+                   "MOD-PM-00897", "MOD-PM-00898", "MOD-PM-00899", "MOD-PM-00900",
+                   "MOD-PM-01051", "MOD-PM-01052", "MOD-PM-01053", "MOD-PM-01054",
+                   "MOD-PM-01055", "MOD-PM-01056", "MOD-PM-01057", "MOD-PM-01058",
+                   "MOD-PM-01059", "MOD-PM-01060", "MOD-PM-01071", "MOD-PM-01072",
+                   "MOD-PM-01073", "MOD-PM-01074", "MOD-PM-01075", "MOD-PM-01076",
+                   "MOD-PM-01077", "MOD-PM-01078", "MOD-PM-01079", "MOD-PM-01080",
+                   "MOD-PM-01081", "MOD-PM-01082", "MOD-PM-01083", "MOD-PM-01084",
+                   "MOD-PM-01085", "MOD-PM-01086", "MOD-PM-01087", "MOD-PM-01088",
+                   "MOD-PM-01089", "MOD-PM-01090", "MOD-PM-01091", "MOD-PM-01092",
+                   "MOD-PM-01093")
 
-ghana_devices <- c("MOD-00398", "MOD-PM-00882")
 
 # specify time zone 
 Sys.setenv(TZ = 'Africa/Accra') # GMT for Ghana
 
 # Define start_date and end_date
-start_date <- as.Date("2025-04-15")  # Due to timezones, start_date needs to be 1 day before the actual start date of interest
-end_date <- as.Date("2025-04-17")
+start_date <- as.Date("2024-08-16")  # Due to timezones, start_date needs to be 1 day before the actual start date of interest
+end_date <- as.Date("2024-09-30")
 country = "Ghana"
 device_list <- ghana_devices # rename list of serial numbers to broad name for function
 
@@ -135,11 +143,36 @@ cat("Data processing for all devices completed.\n")
 # Combine data for all devices into a single data frame
 final_result_df <- bind_rows(result_combined)
 
-# saveRDS(final_result_df, file = "processed_monitor_data.rds")
 
-# write_csv(final_result_df, "ghana_AQ_parent_full_20240925.csv")
+saveRDS(final_result_df, file = "processed_monitor_data_20240816_20240930.rds")
+
+write_csv(final_result_df, "ghana_AQ_parent_full_20240816_20240930.csv")
+```
+
+```{r}
+aug_sept <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/processed_monitor_data_20240816_20240930.rds")
+
+oct_dec <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/processed_monitor_data_20241001_20241231.rds")
+
+jan_feb <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/processed_monitor_data_20250101_20250228.rds")
+
+march <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/processed_monitor_data_20250301_20250401.rds")
+
+april <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/processed_monitor_data_20250401_20250501.rds")
+
+may_june <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/processed_monitor_data_20250501_20250701.rds")
+
+july_august <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/processed_monitor_data_20250701_20250901.rds")
+
+aug_2024_sept_2025 <- bind_rows(aug_sept, oct_dec, jan_feb, march, april, may_june, july_august) %>%
+  distinct(monitor, timestamp, .keep_all = TRUE)
+
+
+saveRDS(aug_2024_sept_2025, file = "processed_monitor_data_20240816_20250901.rds")
+write_csv(aug_2024_sept_2025, "ghana_AQ_parent_full_20240816_20250901.csv")
 
 ```
+
 
 
 ## loading SD card data
@@ -147,7 +180,7 @@ final_result_df <- bind_rows(result_combined)
 ```{r}
 # List all MOD files with full path
 mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_sept_2025/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
@@ -155,7 +188,7 @@ mod_files <- list.files(
 
 # List all MOD-PM files with full path
 mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_sept_2025/MOD-PM", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-PM.*\\.csv"
@@ -196,7 +229,8 @@ MOD_PM_sd_card <- mod_pm_files %>%
 full_sd_card = bind_rows(MOD_sd_card, MOD_PM_sd_card) %>%
   filter(pm10 < 5000) 
 
-# write_csv(full_sd_card, here("data", "all_measurements", "sd", "full_sd_card_2023-04-24_to_2024-09-11.csv")) 
+# write_rds(full_sd_card, here("data", "all_measurements", "sd", "full_sd_card_2025-03-01_to_2025-09-01.rds"))
+# write_csv(full_sd_card, here("data", "all_measurements", "sd", "full_sd_card_2025-03-01_to_2025-09-01.csv")) 
 
 ```
 
