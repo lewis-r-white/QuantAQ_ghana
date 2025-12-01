@@ -1,3 +1,25 @@
+# summarize_pollution_times.R
+
+# Purpose:
+# Generates hourly and daily summaries for a pollutant using strict
+# completeness rules. Applies:
+# - Hourly completeness: require ≥ min_minutes_per_hour valid minutes
+# - Daily completeness: require ≥ min_hours_per_day complete hours
+# - Fleet completeness: fleet averages only when ≥ min_active_monitors
+
+# Optionally restricts to calibrated values only.
+
+# Dependencies
+
+# Used by:
+#  Final PM post-processing pipeline to create:
+# - community hourly files (pm*_community_hourly.csv)
+# - community daily files  (pm*_community_daily.csv)
+
+# Notes:
+#  Returns a list: list(hourly = , daily = ), each with attached fleet averages for easy downstream merging and plotting.
+
+
 library(dplyr)
 
 summarize_pollution_times <- function(data, pollutant,

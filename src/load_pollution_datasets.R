@@ -1,4 +1,10 @@
-# REPLACE your current load_pollution_datasets() with this:
+# Loads raw cloud PM data (pm1/pm25/pm10) from CSV or RDS, selecting needed columns, filtering extremes, and labeling the source. 
+
+# Upstream of load_and_merge_pm_data.R and required before calibration.
+
+
+library(tidyverse)
+
 load_pollution_datasets <- function(pollutant, file_path, file_type = "csv") {
   cols <- c("monitor", "timestamp", "date", "hour", pollutant)
   data <- switch(

@@ -36,23 +36,23 @@ Before you run anything:
 - Have SD card CSVs and the cloud CSV in the paths referenced in the code. (If your paths change later, only update them in the “load data” chunk.)
 
 **YAML example**: 
-thresholds: 
-- min_active_monitors: 
-  10 min_points: 1000
+thresholds:
+  min_active_monitors: 10
+  min_points: 1000
   min_r2: 0.5
 
-colocation_windows: 
-- name: "window1_initial_fleet" 
-  start: "2023-08-16" 
-  end: "2023-09-20" 
-  monitors: "original_fleet" 
-  reference_monitor: null
+colocation_windows:
+  - name: "window1_initial_fleet"
+    start: "2023-08-16"
+    end:   "2023-09-20"
+    monitors: "original_fleet"
+    reference_monitor: null
 
-- name: "window2_new_monitors" 
-  start: "2024-12-16" 
-  end: "2025-01-25"
-  monitors: "new_fleet" 
-  reference_monitor: "MOD-PM-00884"
+  - name: "window2_new_monitors"
+    start: "2024-12-16"
+    end:   "2025-01-25"
+    monitors: "new_fleet"
+    reference_monitor: "MOD-PM-00884"
 
 ### Load packages, source functions, and load YAML
 
@@ -152,7 +152,7 @@ Expected output:
 ```{r}
 ## MERGE THE SD DATA WITH THE SERVER DATA ---- 
 
-# --- 1) per-pollutant merge ---
+#  per-pollutant merge 
 merge_sd_data_one <- function(pollutant_data, sd_card_data, pollutant) {
   if (!"source" %in% names(pollutant_data)) pollutant_data <- dplyr::mutate(pollutant_data, source = NA_character_)
   if (!"source" %in% names(sd_card_data))  sd_card_data   <- dplyr::mutate(sd_card_data,   source = "sd_card")
@@ -179,12 +179,28 @@ merge_sd_data_one <- function(pollutant_data, sd_card_data, pollutant) {
     dplyr::select(monitor, timestamp, date, hour, !!rlang::sym(pollutant), source)
 }
 
-# --- 2) loop over pollutants ---
+# loop over pollutants 
 merge_cloud_sd_all <- function(pollutants, raw_data, sd_card_data) {
   setNames(lapply(pollutants, function(p) {
     merge_sd_data_one(raw_data[[p]]$raw_cloud, sd_card_data, p)
   }), pollutants)
 }
+
+
+## If no SD card. Merge with empty. 
+# full_sd_card <- tibble(
+#   timestamp_iso = as.POSIXct(character()),  # <dttm>
+#   co           = double(),
+#   no           = double(),
+#   no2          = double(),
+#   o3           = double(),
+#   pm1          = double(),
+#   pm10         = double(),
+#   pm25         = double(),
+#   monitor      = character(),
+#   source       = character()
+# )
+
 
 # Run it
 merged_results <- merge_cloud_sd_all(pollutants, raw_data, full_sd_card)
@@ -215,7 +231,7 @@ w2 <- config$colocation_windows[[2]]
 new_ids <- get_monitor_ids(w2$monitors)
 
 if (is.null(new_ids) || length(new_ids) == 0) {
-  stop("No monitor IDs found for '", w2$monitors, "'. Make sure config/new_fleet.csv exists and has a 'monitor' column.")
+  stop("No monitor IDs found for '", w2$monitors, "'. Make sure data/new_fleet.csv exists and has a 'monitor' column.")
 }
 
 
@@ -582,7 +598,12 @@ We first choose the most recent calibration row per monitor with pick_most_recen
 
 If a monitor has no coefficients, we keep the raw measurement and set a boolean flag column (e.g., calibrated_pm25 = FALSE)
 
-Save the full corrected output
+Save the full corrected output.
+
+Note: 
+The new colocation consistently shows slopes around 0.8 and intercepts between 6–15 µg/m³ When I apply these corrections, I’m seeing quite a few negative values at low PM raw concentrations.
+
+My hypothesis is that the reference monitor used for the second colocation (MOD-PM-00884) had the lowest slope (0.82) from the initial colocation fleet-average regression, suggesting it was somewhat less sensitive than the fleet average. When corrected, its PM readings are scaled up by roughly 20%, which may bias its behavior as a reference—especially after a year in the field and under different seasonal conditions (e.g., Harmattan). The second colocation also took place during Harmattan (higher concentrations and more variability), so the regression may not capture low-end behavior as well. Since the new colocations relied on this single reference rather than a fleet average, any bias in the reference is likely transferred to the new monitors. There may also be some inherent sensitivity differences between the older and newer monitors.
 
 ```{r}
 library(rlang)
@@ -748,57 +769,158 @@ summarize_pollution_times() enforces completeness:
 It returns a list with hourly and daily, each including both per-monitor means and a fleet average column.
 
 ```{r}
+original_fleet <- read_csv(here("data", "original_fleet.csv")) 
+new_fleet <- read_csv(here("data", "new_fleet.csv")) 
+
+## Here, I set implausibly low readings to NAs. Could update workflow so this is done above before saving corrected data. 
+
+pm1_corrected <- read_rds(here("data", "pm", "final", "pm1_corrected_20240816_20250901.rds")) %>%
+  mutate(pm1 = if_else(pm1 < 1, NA_real_, pm1),
+         pm1_raw = if_else(pm1_raw < 1, NA_real_, pm1_raw))
+
+
+pm1_clean <- pm1_corrected %>%
+  mutate(
+    pm1_data_summarize = if_else(
+      monitor %in% original_fleet$monitor,
+      pm1,        # corrected values if in original fleet 
+      pm1_raw     # raw values for new fleet. correction equation was leading to a lot of negative readings. 
+    )
+  )
+
+
+pm10_corrected <- read_rds(here("data", "pm", "final", "pm10_corrected_20240816_20250901.rds")) %>%
+  mutate(pm10 = if_else(pm10 < 1, NA_real_, pm10),
+         pm10_raw = if_else(pm10_raw < 1, NA_real_, pm10_raw))
+
+pm10_clean <- pm10_corrected %>%
+  mutate(
+    pm10_data_summarize = if_else(
+      monitor %in% original_fleet$monitor,
+      pm10,        # corrected values if in original fleet 
+      pm10_raw     # raw values for new fleet
+    )
+  )
+
+
+pm25_corrected <- read_rds(here("data", "pm", "final", "pm25_corrected_20240816_20250901.rds")) %>%
+  mutate(pm25 = if_else(pm25 < 1, NA_real_, pm25),
+         pm25_raw = if_else(pm25_raw < 1, NA_real_, pm25_raw))
+
+pm25_clean <- pm25_corrected %>%
+  mutate(
+    pm25_data_summarize = if_else(
+      monitor %in% original_fleet$monitor,
+      pm25,        # corrected values if in original fleet 
+      pm25_raw     # raw values for new fleet
+    )
+  )
+
+
+
+
 summarized_pm1 <- summarize_pollution_times(
-  pm1_corrected, "pm1",
+  pm1_clean, "pm1_data_summarize",
   min_minutes_per_hour = 45,
   min_hours_per_day   = 18,
   min_active_monitors = 10
 )
 
+
 summarized_pm10 <- summarize_pollution_times(
-  pm10_corrected, "pm10",
+  pm10_clean, "pm10_data_summarize",
   min_minutes_per_hour = 45,
   min_hours_per_day   = 18,
   min_active_monitors = 10
 )
 
 summarized_pm25 <- summarize_pollution_times(
-  pm25_corrected, "pm25",
+  pm25_clean, "pm25_data_summarize",
   min_minutes_per_hour = 45,
   min_hours_per_day   = 18,
   min_active_monitors = 10
 )
 
 
-pm1_community_hourly <- summarized_pm1$hourly
-pm1_community_daily <- summarized_pm1$daily
+pm1_community_hourly <- summarized_pm1$hourly %>% 
+  rename(mean_pm1 = mean_pm1_data_summarize,
+         fleet_average_pm1 = fleet_average_pm1_data_summarize)
 
-pm25_community_hourly <- summarized_pm25$hourly
-pm25_community_daily <- summarized_pm25$daily
+pm1_community_daily <- summarized_pm1$daily %>% 
+  rename(mean_pm1 = mean_pm1_data_summarize,
+         fleet_average_pm1 = fleet_average_pm1_data_summarize)
 
-pm10_community_hourly <- summarized_pm10$hourly
-pm10_community_daily <- summarized_pm10$daily
+pm25_community_hourly <- summarized_pm25$hourly %>% 
+  rename(mean_pm25 = mean_pm25_data_summarize,
+         fleet_average_pm25 = fleet_average_pm25_data_summarize)
+
+pm25_community_daily <- summarized_pm25$daily %>% 
+  rename(mean_pm25 = mean_pm25_data_summarize,
+         fleet_average_pm25 = fleet_average_pm25_data_summarize)
+
+pm10_community_hourly <- summarized_pm10$hourly %>% 
+  rename(mean_pm10 = mean_pm10_data_summarize,
+         fleet_average_pm10 = fleet_average_pm10_data_summarize)
+
+pm10_community_daily <- summarized_pm10$daily %>%
+  rename(mean_pm10 = mean_pm10_data_summarize,
+         fleet_average_pm10 = fleet_average_pm10_data_summarize)
 ```
 
 ### Save the summarized output for analysis
 
 ```{r}
-# # Save as CSV
-# write_csv(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20240901.csv"))
-# write_csv(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20240901.csv"))
-# write_csv(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20240901.csv"))
+# Save as CSV
+# write_csv(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.csv"))
+# write_csv(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.csv"))
+# write_csv(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.csv"))
 # 
-# write_csv(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20240901.csv"))
-# write_csv(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20240901.csv"))
-# write_csv(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20240901.csv"))
+# write_csv(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20250901.csv"))
+# write_csv(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20250901.csv"))
+# write_csv(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20250901.csv"))
 # 
 # 
 # # Save as RDS
-# write_rds(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20240901.rds"))
-# write_rds(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20240901.rds"))
-# write_rds(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20240901.rds"))
+# write_rds(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.rds"))
+# write_rds(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.rds"))
+# write_rds(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.rds"))
 # 
-# write_rds(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20240901.rds"))
-# write_rds(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20240901.rds"))
-# write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20240901.rds"))
+# write_rds(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20250901.rds"))
+# write_rds(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20250901.rds"))
+# write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20250901.rds"))
+
 ```
+
+
+```{r}
+# pm25_community_hourly <- pm25_community_hourly %>%
+#   select(monitor, date, hour, mean_pm25)
+# 
+# pm1_community_hourly <- pm1_community_hourly %>%
+#   select(monitor, date, hour, mean_pm1)
+# 
+# pm10_community_hourly <- pm10_community_hourly %>%
+#   select(monitor, date, hour, mean_pm10)
+# 
+# full_hourly_summary <- left_join(pm25_community_hourly, pm1_community_hourly, by = c("monitor", "date", "hour")) %>%
+#   left_join(pm10_community_hourly, by = c("monitor", "date", "hour"))
+# 
+# write_csv(full_hourly_summary, here("data", "pm", "summarized", "modpm00884_hourly_20250901-20251115.csv"))
+# 
+# 
+# pm25_community_daily <- pm25_community_daily %>%
+#   select(monitor, date, mean_pm25)
+# 
+# pm1_community_daily <- pm1_community_daily %>%
+#   select(monitor, date, mean_pm1)
+# 
+# pm10_community_daily <- pm10_community_daily %>%
+#   select(monitor, date, mean_pm10)
+# 
+# full_daily_summary <- left_join(pm25_community_daily, pm1_community_daily, by = c("monitor", "date")) %>%
+#   left_join(pm10_community_daily, by = c("monitor", "date"))
+# 
+# write_csv(full_daily_summary, here("data", "pm", "summarized", "modpm00884_daily_20250901-20251115.csv"))
+
+```
+

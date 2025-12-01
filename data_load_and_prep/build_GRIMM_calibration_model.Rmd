@@ -1,0 +1,511 @@
+---
+title: "Build Model to Calibrate Modulairs with GRIMM"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 6
+    toc_float: true
+date: "`r Sys.Date()`"
+---
+
+
+```{r load libraries, include=FALSE}
+# load libraries 
+library(tidyverse)
+library(purrr)
+library(lubridate)
+library(tidyr)
+library(sf)
+library(here)
+library(readxl)
+library(performance)
+library(lme4)
+library(ICC)
+library(broom)
+library(modelr)
+library(viridis)
+
+# ML packages 
+library(tidymodels)
+library(tictoc)
+library(vip)
+library(patchwork)
+library(doParallel)
+library(xgboost)
+library(glmnet)
+library(mgcv)
+library(yardstick) 
+library(furrr)
+library(future)
+```
+
+## Load and prepare Modulair Data 
+```{r}
+modulair_pm_25_hourly <- read_csv(here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.csv")) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
+  filter(!is.na(mean_pm25)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm25))
+
+modulair_pm_1_hourly <- read_csv(here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.csv")) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
+  filter(!is.na(mean_pm1)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm1))
+
+modulair_pm_10_hourly <- read_csv(here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.csv")) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
+  filter(!is.na(mean_pm10)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm10))
+
+batch1_pm_00884_hourly <- left_join(modulair_pm_25_hourly, modulair_pm_1_hourly, by = c("monitor", "date", "hour")) %>%
+  left_join(modulair_pm_10_hourly, by = c("monitor", "date", "hour"))
+
+batch2_pm_00884_hourly <- read_csv(here("data", "pm", "summarized", "modpm00884_hourly_20250901-20251115.csv")) %>%
+  filter(!is.na(mean_pm25))
+
+
+modulair_pm_hourly <- bind_rows(batch1_pm_00884_hourly, batch2_pm_00884_hourly) %>%
+  distinct(date, hour, .keep_all = TRUE) # remove overlapping day of sept 1
+
+
+
+
+
+modulair_temp_hourly <- read_csv(here("data", "weather", "summarized", "temp_hourly_20240816-20250901.csv")) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
+  filter(!is.na(mean_met_temp))%>%
+  select(-c(n_minute_obs, n_active, fleet_average_met_temp))
+
+modulair_rh_hourly <- read_csv(here("data", "weather", "summarized", "rh_hourly_20240816-20250901.csv")) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
+  filter(!is.na(mean_met_rh))%>%
+  select(-c(n_minute_obs, n_active, fleet_average_met_rh))
+
+batch1_weather_00884_hourly <- left_join(modulair_temp_hourly, modulair_rh_hourly, by = c("monitor", "date", "hour"))
+
+batch2_weather_00884_hourly <- read_csv(here("data", "weather", "summarized", "modpm00884_hourly_20250901-20251115.csv"))
+
+modulair_weather_hourly <- bind_rows(batch1_weather_00884_hourly, batch2_weather_00884_hourly) %>%
+  distinct(date, hour, .keep_all = TRUE) # remove overlapping day of sept 1
+
+
+modulair_full <- full_join(modulair_pm_hourly, modulair_weather_hourly, by = c("monitor", "date", "hour")) %>%
+  mutate(
+    date_hour = as.POSIXct(paste(date, hour), format = "%Y-%m-%d %H", tz = "UTC") # create date hour column for GRIMM modeling
+  ) %>%
+  select(monitor, date_hour, date, hour, everything()) %>%
+  rename(mod_pm25 = mean_pm25,
+         mod_pm1 = mean_pm1,
+         mod_pm10 = mean_pm10,
+         mod_temp = mean_met_temp,
+         mod_rh = mean_met_rh)
+```
+
+
+```{r}
+hist(modulair_full$mod_pm25) # check out distribution
+```
+
+
+## Load in the GRIMM data 
+
+```{r}
+grimm_full <- read_csv(here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20250811-20251008.csv")) %>%
+  mutate(hour = hour(date_hour)) %>%
+  select(date_hour, date, hour, everything())
+```
+
+## Merge modular and GRIMM data 
+
+```{r}
+# merge and add in seasonality for harmattan
+mod_grimm_full <- inner_join(modulair_full, grimm_full, by = c("date_hour", "date", "hour")) %>%
+  mutate(month = month(date),
+         day = day(date),
+         season = case_when(month %in% c(12, 1, 2) ~ "Harmattan",
+                            month %in% c(3, 4, 5, 6, 7, 8, 9, 10, 11) ~ "Not Harmattan"))
+  
+```
+
+
+## Comparison of GRIMM to Modulair reference 
+
+```{r}
+metrics_df <- mod_grimm_full %>%
+  yardstick::metrics(truth = grimm_pm25, estimate = mod_pm10)
+
+rmse_val <- metrics_df %>% filter(.metric == "rmse") %>% pull(.estimate)
+rsq_val  <- metrics_df %>% filter(.metric == "rsq") %>% pull(.estimate)
+
+
+mod_grimm_full %>%
+  ggplot(aes(x = grimm_pm25, y = mod_rh)) +
+  geom_point(alpha = 0.3) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste0("RMSE: ", round(rmse_val, 2), 
+                   "\nR²: ", round(rsq_val, 2)),
+    size = 4,
+    label.size = .1
+  ) +
+  theme_minimal() +
+  labs(
+    x = "GRIMM: PM 2.5",
+    y = "MOD-PM-00884: PM 2.5",
+    title = "Baseline comparison of GRIMM \n+ reference Modulair PM 2.5",
+    subtitle = "Red line shows slope 1"
+  ) 
+
+```
+
+
+
+## Elastic net regression
+
+```{r}
+set.seed(123) # for reproduceability
+
+split <- initial_split(mod_grimm_full, prop = 0.8) 
+train <- training(split)
+test <- testing(split)
+
+
+#set up cross validation 
+cv_folds <- vfold_cv(train, v = 5)
+```
+
+
+```{r}
+calib_recipe <- recipe(
+    grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour,
+    data = mod_grimm_full
+) %>%
+  step_mutate(
+    hour = factor(hour)
+  ) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_impute_bag(all_numeric_predictors()) %>%      
+  step_normalize(all_numeric_predictors()) %>%
+  step_zv(all_predictors())
+
+
+enet_spec <- linear_reg(
+  penalty = tune(),     # overall shrinkage
+  mixture = tune()      # 0 = ridge, 1 = LASSO, between = elastic net
+) %>%
+  set_engine("glmnet")
+
+
+enet_grid <- grid_regular(
+  penalty(range = c(-4, 0)),   # 10^-4 to 10^0 = 1e-4 to 1.0
+  mixture(range = c(0, 1)),
+  levels = 6
+)
+
+
+enet_wf <- workflow() %>%
+  add_recipe(calib_recipe) %>%
+  add_model(enet_spec)
+
+
+set.seed(123)
+enet_tuned <- tune_grid(
+  enet_wf,
+  resamples = cv_folds,
+  grid = enet_grid,
+  metrics = metric_set(yardstick::rmse, yardstick::rsq, yardstick::mae)
+)
+
+
+best_enet <- select_best(enet_tuned, metric = "rmse")
+final_enet_wf <- finalize_workflow(enet_wf, best_enet)
+
+enet_last <- last_fit(final_enet_wf, split)
+collect_metrics(enet_last)
+
+
+enet_preds <- collect_predictions(enet_last)
+
+ggplot(enet_preds, aes(x = grimm_pm25, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  coord_equal() +
+  labs(
+    title = "Elastic Net: Observed vs Predicted PM2.5 (Test Set)",
+    x = "Observed PM2.5 (GRIMM)",
+    y = "Predicted PM2.5 (Elastic Net)"
+  ) +
+  theme_minimal()
+
+
+
+
+enet_fit <- fit(final_enet_wf, data = mod_grimm_full)
+
+enet_fit %>% 
+  extract_fit_parsnip() %>% 
+  tidy()
+
+saveRDS(enet_fit, here("data", "calibration", "modulair_grimm_enet_model.rds"))
+
+
+```
+
+
+
+
+# Set up for ML 
+* NOTE: will definitely want to run this again once there is more data, especially with harmattan season. Include that as predictor as well. 
+
+```{r}
+set.seed(123) # for reproduceability
+
+split <- initial_split(mod_grimm_full, prop = 0.8) 
+train <- training(split)
+test <- testing(split)
+
+
+#set up cross validation 
+cv_folds <- vfold_cv(train, v = 5)
+```
+
+
+```{r}
+calibration_recipe <- recipe(grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour + season, data = train) %>%
+  step_mutate(
+    hour = as.factor(hour),
+    season = as.factor(season)
+  ) %>%
+  step_novel(all_nominal_predictors()) %>%   # handle unseen levels in future prediction (e.g. harmattan season when trained only non harmattan)
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_impute_bag(all_numeric_predictors()) %>% # fix for missingness. Imputes using bagged decision trees. 
+  step_zv(all_predictors()) %>%  # drop zero-variance (e.g. season when all non-harmattan)
+  step_normalize(all_numeric_predictors())
+
+
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  learn_rate = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune()
+  ) %>%
+  set_mode("regression") %>%
+  set_engine("xgboost", early_stopping_rounds = 20)
+
+
+
+xgb_grid <- grid_max_entropy(
+  tree_depth(),
+  learn_rate(),
+  loss_reduction(),
+  sample_prop(),
+  finalize(mtry(), train),
+  size = 25
+)
+
+xgb_wf <- workflow() %>%
+  add_recipe(calibration_recipe) %>%
+  add_model(xgb_spec)
+
+tictoc::tic()
+
+registerDoParallel()
+set.seed(123)
+
+xgb_tuned <- tune_grid(
+  xgb_wf,
+  resamples = cv_folds,
+  grid = xgb_grid,
+  metrics = metric_set(yardstick::rmse, yardstick::rsq, yardstick::mae)
+)
+
+tictoc::toc() # around 50 mins
+beepr::beep(sound = 2)
+
+
+best_params <- select_best(xgb_tuned, metric = "rmse")
+
+final_wf <- finalize_workflow(xgb_wf, best_params)
+
+final_fit <- last_fit(final_wf, split)
+
+collect_metrics(final_fit)
+```
+
+## Evaluate on test set 
+
+```{r}
+# save metrics 
+metrics <- collect_metrics(final_fit)
+
+# pull rmse and rsq from metrics 
+rmse_test <- metrics %>% filter(.metric == "rmse") %>% pull(.estimate)
+rsq_test  <- metrics %>% filter(.metric == "rsq") %>% pull(.estimate)
+
+# get predictions for test set
+test_results <- collect_predictions(final_fit)
+
+# plot results and include rmse and rsq 
+ggplot(test_results, aes(x = grimm_pm25, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  coord_equal()  +
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste0(
+      "RMSE: ", round(rmse_test, 2), "\n",
+      "R²: ", round(rsq_test, 3)
+    ),
+    size = 4,
+    label.size = .1
+  ) +
+  labs(
+    title = "XGBoost: Observed vs Predicted PM2.5 (Test Set)",
+    x = "Observed PM2.5",
+    y = "Predicted PM2.5"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+# Try with other PMs from modulair included 
+
+```{r}
+set.seed(123) # for reproduceability
+
+split <- initial_split(mod_grimm_full, prop = 0.8) 
+train <- training(split)
+test <- testing(split)
+
+
+#set up cross validation 
+cv_folds <- vfold_cv(train, v = 5)
+```
+
+```{r}
+calibration_recipe <- recipe(
+    grimm_pm25 ~ mod_pm25 + mod_pm1 + mod_pm10 + mod_temp + mod_rh + hour + season,
+    data = train
+) %>%
+  step_mutate(
+    hour = factor(hour),
+    season = factor(season)
+  ) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_impute_bag(all_numeric_predictors()) %>% # fix for missingness. Imputes using bagged decision trees. 
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  learn_rate = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune()
+  ) %>%
+  set_mode("regression") %>%
+  set_engine("xgboost", early_stopping_rounds = 20)
+
+
+
+xgb_grid <- grid_max_entropy(
+  tree_depth(),
+  learn_rate(),
+  loss_reduction(),
+  sample_prop(),
+  finalize(mtry(), train),
+  size = 25
+)
+
+xgb_wf <- workflow() %>%
+  add_recipe(calibration_recipe) %>%
+  add_model(xgb_spec)
+
+tictoc::tic()
+
+registerDoParallel()
+set.seed(123)
+
+xgb_tuned <- tune_grid(
+  xgb_wf,
+  resamples = cv_folds,
+  grid = xgb_grid,
+  metrics = metric_set(yardstick::rmse, yardstick::rsq, yardstick::mae)
+)
+
+tictoc::toc() # around 50 mins
+beepr::beep(sound = 2)
+
+
+best_params <- select_best(xgb_tuned, metric = "rmse")
+
+final_wf <- finalize_workflow(xgb_wf, best_params)
+
+final_fit <- last_fit(final_wf, split)
+
+collect_metrics(final_fit)
+```
+
+## Evaluate on test set 
+
+```{r}
+# save metrics 
+metrics <- collect_metrics(final_fit)
+
+# pull rmse and rsq from metrics 
+rmse_test <- metrics %>% filter(.metric == "rmse") %>% pull(.estimate)
+rsq_test  <- metrics %>% filter(.metric == "rsq") %>% pull(.estimate)
+
+# get predictions for test set
+test_results <- collect_predictions(final_fit)
+
+# plot results and include rmse and rsq 
+ggplot(test_results, aes(x = grimm_pm25, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  coord_equal()  +
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste0(
+      "RMSE: ", round(rmse_test, 2), "\n",
+      "R²: ", round(rsq_test, 3)
+    ),
+    size = 4,
+    label.size = .1
+  ) +
+  labs(
+    title = "XGBoost: Observed vs Predicted PM2.5 (Test Set)",
+    x = "Observed PM2.5",
+    y = "Predicted PM2.5"
+  ) +
+  theme_minimal()
+```
+
+# Save model to be applied to other monitors 
+
+```{r}
+# Refit final workflow on the full calibration dataset
+calib_fit <- fit(final_wf, data = mod_grimm_full)
+
+# Save it to disk
+saveRDS(calib_fit, here("data", "calibration", "modulair_grimm_xgb_calib_workflow.rds"))
+```
+
+

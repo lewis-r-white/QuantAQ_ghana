@@ -36,12 +36,6 @@ merged_results <- merge_cloud_sd_colocation_and_community(pollutants, raw_data, 
 
 
 
-
-
-
-
-
-
 # ---- inputs ----
 monitor_info_path <- here("data", "monitor_community_info.csv")
 

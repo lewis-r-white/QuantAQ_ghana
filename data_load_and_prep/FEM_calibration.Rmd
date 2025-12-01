@@ -1,0 +1,103 @@
+---
+title: "Calibrate Modulairs"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 6
+    toc_float: true
+date: "`r Sys.Date()`"
+---
+
+```{r load libraries, include=FALSE}
+# load libraries 
+library(tidyverse)
+library(purrr)
+library(lubridate)
+library(here)
+library(viridis)
+library(tidymodels)
+library(yardstick) 
+```
+
+## Load and prepare Modulair Data 
+```{r}
+modulair_pm_25_hourly <- read_csv(here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.csv")) %>%
+  filter(!is.na(mean_pm25)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm25))
+
+modulair_pm_1_hourly <- read_csv(here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.csv")) %>%
+  filter(!is.na(mean_pm1)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm1))
+
+modulair_pm_10_hourly <- read_csv(here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.csv")) %>%
+  filter(!is.na(mean_pm10)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm10))
+
+modulair_temp_hourly <- read_csv(here("data", "weather", "summarized", "temp_hourly_20240816-20250901.csv")) %>%
+  filter(!is.na(mean_met_temp)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_met_temp))
+
+modulair_rh_hourly <- read_csv(here("data", "weather", "summarized", "rh_hourly_20240816-20250901.csv")) %>%
+  filter(!is.na(mean_met_rh)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_met_rh))
+```
+
+## Join individual variables to full data and format data to match calibration model expectations 
+
+```{r}
+modulair_full <- full_join(modulair_pm_25_hourly, modulair_pm_1_hourly, by = c("monitor", "date", "hour")) %>%
+  full_join(modulair_pm_10_hourly, by = c("monitor", "date", "hour")) %>%
+  full_join(modulair_temp_hourly, by = c("monitor", "date", "hour")) %>%
+  full_join(modulair_rh_hourly, by = c("monitor", "date", "hour")) %>%
+  
+  mutate(
+    date_hour = as.POSIXct(paste(date, hour), format = "%Y-%m-%d %H", tz = "UTC") # create date hour column for GRIMM modeling
+  ) %>%
+  select(monitor, date_hour, date, hour, everything()) %>%
+  rename(mod_pm25 = mean_pm25,
+         mod_pm1 = mean_pm1,
+         mod_pm10 = mean_pm10,
+         mod_temp = mean_met_temp,
+         mod_rh = mean_met_rh) %>%
+  mutate(month = month(date),
+         day = day(date),
+         season = case_when(month %in% c(12, 1, 2) ~ "Harmattan",
+                            month %in% c(3, 4, 5, 6, 7, 8, 9, 10, 11) ~ "Not Harmattan"))
+```
+
+## load the model
+
+```{r}
+calib_model <- read_rds(here("data", "calibration", "modulair_grimm_xgb_calib_workflow.rds"))
+
+enet_model <- read_rds(here("data", "calibration", "modulair_grimm_enet_model.rds"))
+
+```
+
+## apply the predictions and save calibrated data
+
+```{r}
+modulair_preds <- enet_model %>%
+  predict(new_data = modulair_full) %>%
+  rename(pm25_fem_calibrated = .pred) %>%
+  bind_cols(modulair_full)
+
+
+set.seed(123)
+plot_df <- modulair_preds %>% 
+  sample_n(10000)   # or sample_frac(0.05)
+
+
+ggplot(plot_df, aes(x = mod_pm25, y = pm25_fem_calibrated, color = season)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_abline(slope = 1, intercept = 0) +
+  coord_equal() +
+  theme_minimal()
+
+## Save calibrated data
+write_rds(
+  modulair_preds,
+  here("data", "all_measurements", "summarized", "modulair_full_calibrated.rds")
+)
+```
+

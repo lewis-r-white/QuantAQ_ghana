@@ -9,9 +9,9 @@ knitr::opts_chunk$set(echo = TRUE)
 options(scipen=999)
 ```
 
-This R Markdown document reads in processed SD card, merges it with cloud data, and applies correction formula based on co-location regression.
+This R Markdown document reads in processed SD card, merges it with cloud data.
  
-It starts by cleaning particulate matter temperature data, then relative humidity, then wind. 
+It starts by cleaning temperature data, then relative humidity, then wind. 
 
 ```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
 ### load packages 
@@ -35,6 +35,8 @@ library(broom)
 library(Metrics) 
 library(kableExtra) # table creation
 library(GGally)
+library(stringr)  # for str_extract
+library(rlang)    # for sym / !!
 
 # source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
 source(here("src", "load_pollution_datasets.R"))
@@ -67,71 +69,142 @@ When merging the data below, we harmonize these fields into unified temp and rh 
 ```{r}
 ## LOAD SD CARD DATA ----
 
-mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD", 
+# Load MOD files ----
+mod_files1 <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_feb_2025/MOD", 
   full.names = TRUE, pattern = "MOD-00.*\\.csv"
 )
 
-mod_pm_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD-PM", 
+mod_files2 <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_sept_2025/MOD", 
+  full.names = TRUE, pattern = "MOD-00.*\\.csv"
+)
+
+mod_files <- c(mod_files1, mod_files2)
+
+
+# load MOD-PM files ----
+mod_pm_files1 <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_feb_2025/MOD-PM", 
   full.names = TRUE, pattern = "MOD-PM.*\\.csv"
 )
 
+mod_pm_files2 <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_sept_2025/MOD-PM", 
+  full.names = TRUE, pattern = "MOD-PM.*\\.csv"
+)
+
+mod_pm_files <- c(mod_pm_files1, mod_pm_files2)
+
+
+
+
 # Works for both MOD and MOD-PM files
 read_mod_temp_rh <- function(file) {
-  monitor <- str_extract(basename(file), "MOD(-PM)?-\\d+")
-  read_csv(file) %>%
-    select(timestamp_iso, sample_temp, sample_rh) %>%
-    mutate(monitor = monitor)
+  monitor <- str_extract(basename(file), "MOD(?:-PM)?-\\d+")
+  df <- read_csv(file, show_col_types = FALSE) %>%
+    mutate(timestamp_iso = ymd_hms(timestamp_iso, tz = "UTC"))
+
+  # coalesce ONLY allowed columns (no opc_*)
+  tcols <- intersect(c("sample_temp","met_temp"), names(df))
+  rcols <- intersect(c("sample_rh","met_rh"),   names(df))
+
+  if (length(tcols) == 0 || length(rcols) == 0) {
+    warning("Missing temp/rh in: ", file,
+            " (temp cols: ", toString(tcols), 
+            "; rh cols: ", toString(rcols), ")")
+  }
+
+  tibble(
+    timestamp_iso = df$timestamp_iso,
+    monitor       = monitor,
+    met_temp      = if (length(tcols)) coalesce(!!!df[tcols]) else NA_real_,
+    met_rh        = if (length(rcols)) coalesce(!!!df[rcols]) else NA_real_,
+    source        = "sd_card"
+  )
 }
+
+
+
+
 
 temp_rh_sd_card <- bind_rows(
   map_dfr(mod_files, read_mod_temp_rh),
   map_dfr(mod_pm_files, read_mod_temp_rh)
-) %>%
-  rename(met_temp = sample_temp, 
-         met_rh = sample_rh) %>%
-  mutate(source = "sd_card")
+)
 
 # Save if needed
-# write_rds(temp_rh_sd_card, here("data", "weather", "temp_rh_sd_card_20230815-20240820.rds"))
-# temp_rh_sd_card <- read_rds(here("data", "weather", "temp_rh_sd_card_20230815-20240820.rds"))
-
+# write_rds(temp_rh_sd_card, here("data", "weather", "sd", "temp_rh_sd_card_20240820-20250530.rds"))
+# temp_rh_sd_card <- read_rds(here("data", "weather", "sd",  "temp_rh_sd_card_20240820-20250530.rds"))
+# 
 
 
 
 # LOAD THE CLOUD DATA ----
 
 measurements <- c("met_temp", "met_rh")
-cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
+cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20240816_20250901.csv"
+
 
 raw_data <- map(measurements, ~ load_pollution_datasets(.x, file_path = cloud_file, file_type = "csv"))
 names(raw_data) <- measurements
-
-
-
 
 ```
 
 
 ### Merge the cloud and SD data
 ```{r}
-## MERGE THE SD DATA WITH THE SERVER DATA ---- 
-merged_weather <- merge_cloud_sd_colocation_and_community(
-  measurements,
-  raw_data,
-  temp_rh_sd_card
-)
+# Function to merge sd_card data when cloud data is missing
+merge_sd_data <- function(pollutant_data, sd_card_data, pollutant) {
+  # Left join to keep all cloud data and only add sd_card data where cloud is missing
+  merged_data <- pollutant_data %>%
+    left_join(sd_card_data, by = c("timestamp" = "timestamp_iso", "monitor" = "monitor"), suffix = c(".raw", ".sd")) %>%
+    mutate(
+      !!pollutant := coalesce(!!sym(paste0(pollutant, ".raw")), !!sym(paste0(pollutant, ".sd"))),
+      source = coalesce(source.raw, source.sd)
+    ) %>%
+    select(monitor, timestamp, date, hour, all_of(pollutant), source)  # Only keep necessary columns
+  
+  return(merged_data)
+}
+
+# merge across list of variables
+merge_cloud_sd <- function(pollutants, raw_data, sd_card_data) {
+  setNames(
+    lapply(pollutants, function(p) {
+      cloud_full  <- raw_data[[p]]$raw_cloud
+      merge_sd_data(cloud_full, sd_card_data, p)
+    }),
+    pollutants
+  )
+}
 
 
-# pull the individual datasets
-met_temp_merged <- merged_weather$met_temp$merged_full
-met_rh_merged <- merged_weather$met_rh$merged_full
+# 
+# ## empty SD card when no SD card to merge with 
+# full_sd_card <- tibble::tibble(
+#   timestamp_iso = lubridate::as_datetime(character()),
+#   met_temp = numeric(),
+#   met_rh = numeric(),
+#   monitor = character(),
+#   source  = character()
+# )
 
 
-#save outputs 
-# write_rds(met_temp_merged, here("data", "weather", "met_temp_merged_20230815-20240820.rds"))
-# write_rds(met_rh_merged, here("data", "weather", "met_rh_merged_20230815-20240820.rds"))
+
+
+# Complete the merge 
+merged_weather <- merge_cloud_sd(measurements, raw_data, temp_rh_sd_card)
+# access (note: no $merged_full layer anymore)
+met_temp_merged <- merged_weather$met_temp
+met_rh_merged   <- merged_weather$met_rh
+
+
+## save outputs
+# write_csv(met_temp_merged, here("data", "weather", "merged", "met_temp_merged_20240816-20250901.csv"))
+# write_csv(met_rh_merged, here("data", "weather", "merged",  "met_rh_merged_20240816-20250901.csv"))
+# write_rds(met_temp_merged, here("data", "weather", "merged", "met_temp_merged_20240816-20250901.rds"))
+# write_rds(met_rh_merged, here("data", "weather", "merged", "met_rh_merged_20240816-20250901.rds"))
 
 ```
 
@@ -154,12 +227,43 @@ rh_hourly <- met_rh_summary$hourly
 rh_daily <- met_rh_summary$daily
 
 
-# save the summarized outputs 
-# write_rds(temp_hourly, here("data", "weather", "summarized", "temp_hourly_20230815-20240820.rds"))
-# write_rds(temp_daily, here("data", "weather", "summarized", "temp_daily_20230815-20240820.rds"))
+
+# temp_hourly <- temp_hourly %>%
+#   select(monitor, date, hour, mean_met_temp)
 # 
-# write_rds(rh_hourly, here("data", "weather", "summarized", "rh_hourly_20230815-20240820.rds"))
-# write_rds(rh_daily, here("data", "weather", "summarized", "rh_daily_20230815-20240820.rds"))
+# rh_hourly <- rh_hourly %>%
+#   select(monitor, date, hour, mean_met_rh)
+# 
+# full_hourly_summary <- left_join(temp_hourly, rh_hourly, by = c("monitor", "date", "hour"))
+# 
+# write_csv(full_hourly_summary, here("data", "weather", "summarized", "modpm00884_hourly_20250901-20251115.csv"))
+# 
+# 
+# temp_daily <- temp_daily %>%
+#   select(monitor, date, mean_met_temp)
+# 
+# rh_daily <- rh_daily %>%
+#   select(monitor, date, mean_met_rh)
+# 
+# full_daily_summary <- left_join(temp_daily, rh_daily, by = c("monitor", "date"))
+# 
+# 
+# write_csv(full_daily_summary, here("data", "weather", "summarized", "modpm00884_daily_20250901-20251115.csv"))
+
+
+
+
+# save the summarized outputs 
+write_rds(temp_hourly, here("data", "weather", "summarized", "temp_hourly_20240816-20250901.rds"))
+write_rds(temp_daily, here("data", "weather", "summarized", "temp_daily_20240816-20250901.rds"))
+write_csv(temp_hourly, here("data", "weather", "summarized", "temp_hourly_20240816-20250901.csv"))
+write_csv(temp_daily, here("data", "weather", "summarized", "temp_daily_20240816-20250901.csv"))
+
+
+write_rds(rh_hourly, here("data", "weather", "summarized", "rh_hourly_20240816-20250901.rds"))
+write_rds(rh_daily, here("data", "weather", "summarized", "rh_daily_20240816-20250901.rds"))
+write_csv(rh_hourly, here("data", "weather", "summarized", "rh_hourly_20240816-20250901.csv"))
+write_csv(rh_daily, here("data", "weather", "summarized", "rh_daily_20240816-20250901.csv"))
 
 ```
 
@@ -170,34 +274,42 @@ rh_daily <- met_rh_summary$daily
 #SD CARD ----
 
 # List all MOD files with full path
-mod_files <- list.files(
-  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_oct_2024/MOD", 
+mod_files1 <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_feb_2025/MOD", 
   full.names = TRUE, 
   recursive = FALSE, 
   pattern = "MOD-00.*\\.csv"
 )
 
+mod_files2 <- list.files(
+  path = "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/processed_sept_2025/MOD", 
+  full.names = TRUE, 
+  recursive = FALSE, 
+  pattern = "MOD-00.*\\.csv"
+)
+
+mod_files <- c(mod_files1, mod_files2)
+
+
 # Function to read, select columns, and add monitor name for MOD files
 read_mod_ws_wd <- function(file) {
-  # Extract the monitor name from the file name
-  monitor_name <- str_extract(basename(file), "MOD-\\d+")
+  monitor_name <- stringr::str_extract(basename(file), "MOD-\\d+")
   
-  read_csv(file) %>%
-    select(timestamp_iso, ws, wd) %>%
-    mutate(monitor = monitor_name)
+  readr::read_csv(file, show_col_types = FALSE) %>%
+    dplyr::mutate(timestamp_iso = lubridate::ymd_hms(timestamp_iso, tz = "UTC"),
+                  monitor = monitor_name) %>%
+    dplyr::select(timestamp_iso, ws, wd, monitor) %>%
+    dplyr::distinct(monitor, timestamp_iso, .keep_all = TRUE)
 }
 
-# Read all MOD files and combine them
-ws_wd_sd_card <- mod_files %>%
-  map_dfr(read_mod_ws_wd)  %>%
-  filter(timestamp_iso > as.Date("2023-08-15")) %>%
-  mutate(source = "sd_card")
+ws_wd_sd_card <- purrr::map_dfr(mod_files, read_mod_ws_wd) %>%
+  dplyr::filter(timestamp_iso >= lubridate::ymd_hms("2024-08-15 00:00:00", tz = "UTC")) %>%
+  dplyr::mutate(source = "sd_card")
 
 
 
-# write_rds(ws_wd_sd_card, here("data", "weather", "ws_wd_sd_card_20230815-20240820.rds"))
-# ws_wd_sd_card <- read_rds(here("data", "weather", "ws_wd_sd_card_20230815-20240820.rds"))
-
+# write_rds(ws_wd_sd_card, here("data", "weather", "sd", "ws_wd_sd_card_20240820-20250530.rds"))
+# ws_wd_sd_card <- read_rds(here("data", "weather", "sd", "ws_wd_sd_card_20240820-20250530.rds"))
 
 
 
@@ -207,7 +319,7 @@ ws_wd_sd_card <- mod_files %>%
 # LOAD CLOUD DATA
 
 measurements <- c("ws", "wd")
-cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20230815-20240925.csv"
+cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20240816_20250901.csv"
 
 raw_data <- map(measurements, ~ load_pollution_datasets(.x, file_path = cloud_file, file_type = "csv"))
 
@@ -218,23 +330,17 @@ names(raw_data) <- measurements
 
 ```{r}
 ## MERGE THE SD DATA WITH THE SERVER DATA ---- 
-merged_wind <- merge_cloud_sd_colocation_and_community(
-  measurements,
-  raw_data,
-  ws_wd_sd_card
-)
 
-# merge wind speed 
-ws_merged <- merged_wind$ws$merged_full %>%
-  filter(str_detect(monitor, "^MOD-\\d+$"))
+merged_wind <- merge_cloud_sd(measurements, raw_data, ws_wd_sd_card)
 
-# merge wind direction 
-wd_merged <- merged_wind$wd$merged_full %>%
-  filter(str_detect(monitor, "^MOD-\\d+$"))
+# access (note: no $merged_full layer anymore)
+ws_merged <- merged_wind$ws
+wd_merged   <- merged_wind$wd
+
 
 # save output
-# write_rds(ws_merged, here("data", "weather", "ws_merged_20230815-20240820.rds"))
-# write_rds(wd_merged, here("data", "weather", "wd_merged_20230815-20240820.rds"))
+write_rds(ws_merged, here("data", "weather", "merged", "ws_merged_20240816-20250901.rds"))
+write_rds(wd_merged, here("data", "weather", "merged", "wd_merged_20240816-20250901.rds"))
 
 
 ```
@@ -273,7 +379,7 @@ temp_rh_full <- full_join(met_temp_merged_unique, met_rh_merged_unique, by = c("
   
 
 # save output 
-write_rds(temp_rh_full, here("data", "weather", "merged", "temp_rh_full_20230815-20240820.rds"))
+write_rds(temp_rh_full, here("data", "weather", "merged", "temp_rh_full_20240816-20250901.rds"))
 
 
 
@@ -285,7 +391,7 @@ wind_full <- full_join(ws_merged_merged_unique, wd_merged_merged_unique, by = c(
   select(monitor, timestamp, date, hour, ws, wd)
 
 # save output 
-write_rds(wind_full, here("data", "weather", "merged", "wind_full_20230815-20240820.rds"))
+write_rds(wind_full, here("data", "weather", "merged", "wind_full_20240816-20250901.rds"))
 
 
 
@@ -299,7 +405,7 @@ weather_full <- weather_full %>%
          hour = hour(timestamp))
 
 # save output 
-write_rds(weather_full, here("data", "weather", "all_weather_vars_20230815-20240820.rds"))
+write_rds(weather_full, here("data", "weather", "all_weather", "all_weather_vars_20240816-20250901.rds"))
 ```
 
 
