@@ -20,6 +20,7 @@ It includes workflows to:
 
 
 ## Repository Structure
+```
 QuantAQ_ghana/
 │
 ├── README.md                     # High-level overview (this file)
@@ -56,7 +57,7 @@ QuantAQ_ghana/
 ├── plots/                        # Generated figures
 │
 └── archive/                      # Deprecated workflows, old scripts, legacy reference
-
+```
 
 ## **Running the Data Preparation Pipeline — Order of Operations**
 
