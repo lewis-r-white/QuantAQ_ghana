@@ -18,9 +18,9 @@ It includes workflows to:
 
 -   Support an interactive Shiny dashboard
 
-
 ## Repository Structure
-```
+
+```         
 QuantAQ_ghana/
 │
 ├── README.md                     # High-level overview (this file)
@@ -65,7 +65,7 @@ Most collaborators will want to run workflows in this order:
 
 ### **1. Load Data (Cloud data from API)**
 
-data_load_and_prep/load_data_from_cloud_API.Rmd
+`data_load_and_prep/load_data_from_cloud_API.Rmd`
 
 -   Downloads QuantAQ data via API
 
@@ -77,7 +77,7 @@ data_load_and_prep/load_data_from_cloud_API.Rmd
 
 ### **2.** Prepare PM Data
 
-data_load_and_prep/pm_data_prep.Rmd
+`data_load_and_prep/pm_data_prep.Rmd`
 
 -   Loads cloud + SD card PM data
 
@@ -93,7 +93,7 @@ data_load_and_prep/pm_data_prep.Rmd
 
 ### **3.** Prepare Gas Data
 
-data_load_and_prep/gas_data_prep.Rmd
+`data_load_and_prep/gas_data_prep.Rmd`
 
 -   Loads cloud + SD card gas data
 
@@ -109,7 +109,7 @@ data_load_and_prep/gas_data_prep.Rmd
 
 ### **4.** Prepare Weather Data
 
-data_load_and_prep/weather_data_prep.Rmd
+`data_load_and_prep/weather_data_prep.Rmd`
 
 -   Loads temperature, RH, wind speed, wind direction from cloud & SD
 
@@ -121,25 +121,41 @@ data_load_and_prep/weather_data_prep.Rmd
 
 ### 5. Load & Calibrate GRIMM FEM for Validation
 
-data_load_and_prep/load_clean_GRIMM_data.Rmd
+`data_load_and_prep/load_clean_GRIMM_data.Rmd`
 
-data_load_and_prep/FEM_calibration.Rmd
+`data_load_and_prep/FEM_calibration.Rmd`
 
-data_load_and_prep/build_GRIMM_calibration_model.Rmd
+`data_load_and_prep/build_GRIMM_calibration_model.Rmd`
 
 ## Analysis Workflows
 
-analysis/data_completeness/ — Missingness, completeness heatmaps, SD vs cloud contributions
+`analysis/data_completeness/`
 
-analysis/trends/ — PM and gas time series, seasonal comparisons, fleets, maps, wind roses
+-   Missingness
 
-air_pollution_dashboard/ — Live dashboard built using summarized outputs
+-   Completeness heatmaps
+
+-   SD vs cloud contributions
+
+`analysis/trends/`
+
+-   PM and gas time series
+
+-   Seasonal/diurnal comparisons
+
+-   Community Level Mapping
+
+-   Wind roses
+
+`air_pollution_dashboard/`
+
+-   dashboard built using summarized outputs
 
 ## Where to Find Detailed Documentation
 
 All methodological details—including calibration theory, merging logic, completeness criteria, device metadata, and guidance on interpreting outputs—are located in:
 
--   docs/quantAQ_pipeline_overview.md
+-   `docs/quantAQ_pipeline_overview.md`
 
 This document explains:
 
