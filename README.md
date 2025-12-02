@@ -18,6 +18,46 @@ It includes workflows to:
 
 -   Support an interactive Shiny dashboard
 
+
+## Repository Structure
+QuantAQ_ghana/
+│
+├── README.md                     # High-level overview (this file)
+├── docs/                         # Detailed documentation & pipeline descriptions
+│   └── quantAQ_pipeline_overview.md
+│
+├── data/                         # Raw, merged, final & summarized datasets (not in GitHub)
+│
+├── data_load_and_prep/           # Main ETL workflows (RMarkdown)
+│   ├── load_data_from_cloud_API.Rmd
+│   ├── pm_data_prep.Rmd
+│   ├── gas_data_prep.Rmd
+│   ├── weather_data_prep.Rmd
+│   ├── load_clean_GRIMM_data.Rmd
+│   ├── FEM_calibration.Rmd
+│   └── README.md
+│
+├── src/                          # Reusable functions for loading/merging/calibration
+│   ├── load_pollution_datasets.R
+│   ├── load_and_merge_pm_data.R
+│   ├── merge_sd_data_gas.R
+│   ├── build_gas_calibration.R
+│   ├── compare_fleet_regression.R
+│   ├── summarize_pollution_times.R
+│   └── README.md
+│
+├── analysis/                     # Trend analysis, completeness, maps, plots
+│   ├── data_completeness/
+│   ├── trends/
+│   └── README.md
+│
+├── air_pollution_dashboard/      # Shiny dashboard + code
+│
+├── plots/                        # Generated figures
+│
+└── archive/                      # Deprecated workflows, old scripts, legacy reference
+
+
 ## **Running the Data Preparation Pipeline — Order of Operations**
 
 Most collaborators will want to run workflows in this order:
