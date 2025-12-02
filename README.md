@@ -153,9 +153,7 @@ Most collaborators will want to run workflows in this order:
 
 ## Where to Find Detailed Documentation
 
-All methodological details—including calibration theory, merging logic, completeness criteria, device metadata, and guidance on interpreting outputs—are located in:
-
--   `docs/quantAQ_pipeline_overview.md`
+All methodological details—including calibration theory, merging logic, completeness criteria, device metadata, and guidance on interpreting outputs—are located in [**this Google doc**](https://docs.google.com/document/d/1q9S-RkpJ9wety1kCXQSQUA39g4Uof6C7vpGudF9gCv8/edit?usp=sharing).
 
 This document explains:
 
