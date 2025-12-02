@@ -3,16 +3,119 @@
 This repository contains the full data-processing and analysis pipeline for air quality monitoring using QuantAQ MODULAIR and MODULAIR-PM devices deployed across communities in Bono East, Ghana.
 
 It includes workflows to:
-  - Load cloud-based data from the QuantAQ API
 
-Load SD card data processed by QuantAQ
+-   Load cloud-based data from the QuantAQ API
 
-Merge cloud and SD card sources into unified time series
+-   Load SD card data processed by QuantAQ
 
-Calibrate PM and gas measurements
+-   Merge cloud and SD card sources into unified time series
 
-Generate summarized hourly and daily datasets
+-   Calibrate PM and gas measurements
 
-Produce analysis outputs and visualizations
+-   Generate summarized hourly and daily datasets
 
-Support an interactive Shiny dashboard
+-   Produce analysis outputs and visualizations
+
+-   Support an interactive Shiny dashboard
+
+## **Running the Data Preparation Pipeline — Order of Operations**
+
+Most collaborators will want to run workflows in this order:
+
+### **1. Load Data (Cloud data from API)**
+
+data_load_and_prep/load_data_from_cloud_API.Rmd
+
+-   Downloads QuantAQ data via API
+
+-   Outputs a single combined cloud dataset
+
+-   Includes code to clean SD card data that has been processed by QuantAQ team as well
+
+-   Saves to: `data/all_measurements/cloud/`
+
+### **2.** Prepare PM Data
+
+data_load_and_prep/pm_data_prep.Rmd
+
+-   Loads cloud + SD card PM data
+
+-   Merges into unified minutely datasets
+
+-   Performs PM colocation calibration (fleet-average regression)
+
+-   Applies correction to community-period PM readings
+
+-   Summarizes hourly & daily PM1, PM2.5, PM10
+
+-   Saves corrected & summarized datasets
+
+### **3.** Prepare Gas Data
+
+data_load_and_prep/gas_data_prep.Rmd
+
+-   Loads cloud + SD card gas data
+
+-   Merges into unified datasets
+
+-   Uses golden monitor regression for CO, NO, NO₂, O₃
+
+-   Applies calibration to community-period gas readings
+
+-   Summarizes hourly & daily gases
+
+-   Saves corrected & summarized datasets
+
+### **4.** Prepare Weather Data
+
+data_load_and_prep/weather_data_prep.Rmd
+
+-   Loads temperature, RH, wind speed, wind direction from cloud & SD
+
+-   Merges and harmonizes variables
+
+-   Summarizes hourly and daily weather
+
+-   Saves merged & summarized datasets
+
+### 5. Load & Calibrate GRIMM FEM for Validation
+
+data_load_and_prep/load_clean_GRIMM_data.Rmd
+
+data_load_and_prep/FEM_calibration.Rmd
+
+data_load_and_prep/build_GRIMM_calibration_model.Rmd
+
+## Analysis Workflows
+
+analysis/data_completeness/ — Missingness, completeness heatmaps, SD vs cloud contributions
+
+analysis/trends/ — PM and gas time series, seasonal comparisons, fleets, maps, wind roses
+
+air_pollution_dashboard/ — Live dashboard built using summarized outputs
+
+## Where to Find Detailed Documentation
+
+All methodological details—including calibration theory, merging logic, completeness criteria, device metadata, and guidance on interpreting outputs—are located in:
+
+-   docs/quantAQ_pipeline_overview.md
+
+This document explains:
+
+-   PM fleet-average calibration
+
+-   Gas golden-monitor calibration
+
+-   Colocation vs community periods
+
+-   SD-card → cloud merging rules
+
+-   Summarization thresholds (hour ≥45 min; day ≥12 hours)
+
+-   File naming conventions
+
+-   Example code snippets
+
+### Contact & Collaboration
+
+This repository was created by Lewis White and is maintained by the CHAP team.
