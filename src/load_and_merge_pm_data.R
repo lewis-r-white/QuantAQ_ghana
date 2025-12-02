@@ -1,3 +1,8 @@
+# Provides functions to load SD card PM data, load cloud PM data (via load_pollution_datasets), and merge them into unified PM time series
+# per pollutant. Handles missing SD files and keeps source labels.
+
+# Dependencies: load_pollution_datasets()
+
 library(tidyverse)
 library(purrr)
 
