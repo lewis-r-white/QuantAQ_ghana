@@ -1,0 +1,102 @@
+---
+title: "Sandbox: Exploring the Data and Testing Things"
+output: 
+  html_document:
+    toc: true
+    theme: united
+date: "2024-06-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+library(here) # file path org
+library(lubridate)# working with dates
+library(tictoc) # timing
+library(DT) # datatables
+library(purrr) # applying functions across df
+library(tidyverse) # data cleaning and plotting
+library(data.table) 
+library(sf) # spatial data 
+library(viridis) # color pallete 
+library(knitr)
+library(modelsummary) # table of regressions
+library(spdep)
+library(gstat)
+library(units) 
+library(gridExtra)
+library(broom)
+library(Metrics) 
+library(kableExtra) # table creation
+
+```
+
+
+```{r load data, echo=FALSE, message=FALSE, warning=FALSE}
+# Load community info
+
+community_info <- read_csv(here("data", "monitor_community_info.csv"))
+
+# LOAD POLLUTION DATA ----
+
+# Load finalized PM and gas data
+
+# corrected data
+pm25 <- read_rds(here("data", "pm", "final", "pm25corrected_20231024-20240816.rds"))
+
+# summarized data 
+pm25_community_hourly <- readRDS(here("data", "pm", "summarized", "pm25_community_hourly_20231024-20240816.rds"))
+pm25_community_daily <- readRDS(here("data", "pm", "summarized", "pm25_community_daily_20231024-20240816.rds"))
+
+```
+
+
+### Check monitors with low prupleair readings to see if QuantAQ also low 
+
+```{r}
+# hourly time series 
+key_monitor_summaries_hourly <- pm25_community_hourly %>%
+  left_join(community_info) %>%
+  filter(description %in% c("Pramposo", "Akora", "Ampoma", "Nante Zongo", "Pamdu")) %>%
+  filter(date <= as.Date("2024-06-15"))
+
+key_monitor_summaries_hourly %>%
+  mutate(datetime = as.POSIXct(date) + hours(hour)) %>%
+  
+  ggplot(aes(x = datetime, y = mean_pm25)) +
+  geom_line(na.rm = FALSE) + 
+  facet_wrap(~ location, scales = "free_y") +
+  labs(title = "Hourly PM2.5 by Location",
+       x = "Datetime",
+       y = "Mean PM2.5 (µg/m³)") +
+  theme_minimal()
+
+
+key_monitor_summaries_daily <- pm25_community_daily %>%
+  left_join(community_info) %>%
+  filter(description %in% c("Pramposo", "Akora", "Ampoma", "Nante Zongo", "Pamdu")) %>%
+  filter(date <= as.Date("2024-09-15"))
+
+
+key_monitor_summaries_daily %>%
+  ggplot(aes(x = date, y = mean_pm25)) +
+  geom_line() +  
+  geom_hline(yintercept = 10, color = "red", linetype = "dashed") +
+  facet_wrap(~ location, scales = "free_y") +
+  labs(
+    title = "Daily PM 2.5 by Location",
+    subtitle = "Dashed line at PM 2.5 = 10 µg/m³",
+    x = "Date",
+    y = "Mean PM2.5 (µg/m³)"
+  ) +
+  theme_minimal()
+
+
+
+
+```
+
+

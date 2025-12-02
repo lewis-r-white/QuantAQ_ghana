@@ -7,6 +7,13 @@
 *SHP*
 *.csv
 *.rds
+*.json
+*.parquet
+*.npy
+*.xlsx
+*.xls
+*.png
+
 ~/.boxr-oauth
 /Users/lewiswhite/.boxr-oauth
 

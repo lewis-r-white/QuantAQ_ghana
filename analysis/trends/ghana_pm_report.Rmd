@@ -40,6 +40,7 @@ library(kableExtra) # table creation
 
 # Source function that creates fleet average vs monitor pollutant reading plot
 source(here("src", "compare_fleet_avg_monitor.R"))
+source(here("src", "compare_fleet_regression.R"))
 
 # Source function that creates heatmap of pollutant readings
 source(here("src", "generate_heatmap.R"))
@@ -151,7 +152,12 @@ ggplot() +
   )
 
 
-ggplot() +
+# Save as high resolution PNG
+ggsave("monitor_map.png", monitor_map, width = 8, height = 6, dpi = 300)
+
+
+
+monitor_map_zoomed <- ggplot() +
   # Add Ghana regions within the bounding box
   geom_sf(data = regions, fill = ifelse(regions$region == "Bono East", "#ffe493", "#dadbe0"), color = "black", alpha = 0.5) +
   # Add monitor points with transparency within the bounding box
@@ -194,6 +200,9 @@ ggplot() +
     legend.text = element_text(size = 10), # Increase legend text size
     legend.title = element_text(size = 12) # Increase legend title size
   )
+
+# Save as high resolution PNG
+ggsave("monitor_map_zoomed.png", monitor_map_zoomed, width = 8, height = 6, dpi = 300)
 ```
 
 
@@ -308,7 +317,7 @@ daily_pollutants_long <- daily_pollutants_long %>%
 daily_pollutants_long$pollutant <- factor(daily_pollutants_long$pollutant, levels = c("Mean PM 1", "Mean PM 2.5", "Mean PM 10"))
 
 
-daily_pollutants_long %>%
+facet_pm_time_series <- daily_pollutants_long %>%
   ggplot(aes(x = date, y = measurement)) +
   geom_line() +
   geom_hline(aes(yintercept = mean_measurement), color = "#cc1414", linetype = "dashed") +
@@ -324,6 +333,9 @@ daily_pollutants_long %>%
     strip.text = element_text(size = 12)  # Increase facet group text size
   )
 
+
+# Save as high resolution PNG
+ggsave("facet_pm_time_series.png", facet_pm_time_series, width = 8, height = 6, dpi = 300)
 ```
 
 
@@ -341,7 +353,7 @@ aqi_levels <- data.frame(
 )
 
 # Plot with legend inside the graph
-daily_pollutants_long %>%
+pm25_colors <- daily_pollutants_long %>%
   filter(pollutant == "Mean PM 2.5") %>% 
   ggplot(aes(x = date, y = measurement)) +
   # Add background rectangles for AQI levels
@@ -371,6 +383,9 @@ daily_pollutants_long %>%
   guides(fill = guide_legend(reverse = TRUE))  # Reverse the order of the legend
 
 
+ggsave("pm25_colors_time_series.png", pm25_colors, width = 8, height = 4, dpi = 300)
+
+
 ```
 
 
@@ -385,7 +400,7 @@ daily_pollutants_long <- daily_pollutants_long %>%
                             right = FALSE))
 
 # Plot with vertical bands and legend on the side
-ggplot(daily_pollutants_long %>% filter(pollutant == "Mean PM 2.5"), 
+pm25_vertical_stripes <- ggplot(daily_pollutants_long %>% filter(pollutant == "Mean PM 2.5"), 
        aes(x = date, y = measurement)) +
   # Add background tiles for AQI levels
   geom_tile(aes(fill = AQI_Category), height = Inf, alpha = 0.3) +
@@ -405,6 +420,10 @@ ggplot(daily_pollutants_long %>% filter(pollutant == "Mean PM 2.5"),
   ) +
   scale_fill_manual(values = aqi_levels$color) +
   guides(fill = guide_legend(reverse = TRUE))  # Reverse the order of the legend
+
+
+ggsave("pm25_vertical_stripes.png", pm25_vertical_stripes, width = 8, height = 4, dpi = 300)
+
 
 ```
 
@@ -528,12 +547,12 @@ heat_map_data <- pm25_community_hourly %>%
     summarize(mean_pm25 = mean(mean_pm25, na.rm = TRUE), .groups = 'drop') %>%
     ungroup() %>%
     mutate(day = day(date),
-           month = factor(format(date, "%b"), levels = c("Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul")),
+           month = factor(format(date, "%b"), levels = c("Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug")),
            year = year(date)) %>%
   mutate(log_mean_pm25 = log(mean_pm25))
 
 
-ggplot(heat_map_data, aes(day, hour, fill = mean_pm25)) +
+pm_heatmap <- ggplot(heat_map_data, aes(day, hour, fill = mean_pm25)) +
     geom_tile(color = NA, size = 0) + 
     scale_fill_gradientn(
         colors = c("#221f26", "#3f2363", "#872CA2", "#D44292", "#F98477", "#EDD9A1", "#fffceb"), # Specify your custom colors
@@ -543,7 +562,7 @@ ggplot(heat_map_data, aes(day, hour, fill = mean_pm25)) +
     facet_grid(~month) +
     scale_y_continuous(trans = "reverse", breaks = unique(heat_map_data$hour)) +
     scale_x_continuous(breaks = c(1, 10, 20, 31)) +
-    theme_minimal(base_size = 8) +
+    #theme_minimal(base_size = 8) +
     labs(x = "Day",
          y = "Hour") + 
     theme(legend.position = "right",
@@ -559,6 +578,7 @@ ggplot(heat_map_data, aes(day, hour, fill = mean_pm25)) +
           axis.title.x = element_text(size = 14),
           panel.background = element_blank())
 
+ggsave("pm25_heatmap.png", pm_heatmap, width = 10, height = 4, dpi = 300)
 
 
 
@@ -572,12 +592,12 @@ heat_map_data <- pm10_community_hourly %>%
     summarize(mean_pm10 = mean(mean_pm10, na.rm = TRUE), .groups = 'drop') %>%
     ungroup() %>%
     mutate(day = day(date),
-           month = factor(format(date, "%b"), levels = c("Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul")),
+           month = factor(format(date, "%b"), levels = c("Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug")),
            year = year(date)) %>%
   mutate(log_mean_pm10 = log(mean_pm10))
 
 
-ggplot(heat_map_data, aes(day, hour, fill = mean_pm10)) +
+pm10_heatmap <- ggplot(heat_map_data, aes(day, hour, fill = mean_pm10)) +
     geom_tile(color = NA, size = 0) + 
     scale_fill_gradientn(
         colors = c("#221f26", "#3f2363", "#872CA2", "#D44292", "#F98477", "#EDD9A1", "#fffceb"), 
@@ -589,7 +609,7 @@ ggplot(heat_map_data, aes(day, hour, fill = mean_pm10)) +
     facet_grid(~month) +
     scale_y_continuous(trans = "reverse", breaks = unique(heat_map_data$hour)) +
     scale_x_continuous(breaks = c(1, 10, 20, 31)) +
-    theme_minimal(base_size = 8) +
+    #theme_minimal(base_size = 8) +
     labs(x = "Day",
          y = "Hour") + 
     theme(legend.position = "right",
@@ -604,6 +624,8 @@ ggplot(heat_map_data, aes(day, hour, fill = mean_pm10)) +
           axis.title.y = element_text(size = 14),
           axis.title.x = element_text(size = 14),
           panel.background = element_blank())
+
+ggsave("pm10_heatmap.png", pm10_heatmap, width = 10, height = 4, dpi = 300)
 
 
 ```
@@ -923,7 +945,7 @@ base_plot <- pm25_community_hourly %>%
   labels = c("Evening Cooking Hours (4pm-8pm)", "Morning Cooking Hours (5am-9am)", "Control Hour (3am)", "Other Hours (Excluding Cooking \nand Control Hours)"))  # Add line breaks in legend labels
 
 ## NOTE: USED RESULTS FROM ANOVA AND TUKEY TESTS TO DETERMINE SIGNFICANCE STARTS. WILL NEED TO BE UPDATED DEPENEDING ON NEW DATA. 
-base_plot +
+full_boxplot_pm25 <- base_plot +
   geom_segment(aes(x = 0.72, xend = 0.90, y = 515, yend = 515), color = "black") +  # Harmattan 
   annotate("text", x = 0.81, y = 518, label = "***") +
   
@@ -966,7 +988,7 @@ base_plot +
   geom_segment(aes(x = 1, xend = 2, y = 590, yend = 590), color = "black") +  # Harmattan vs Not Harmattan
   annotate("text", x = 1.5, y = 600, label = "***") +
   
-  labs(caption ="Comparisons and their significance are denoted by the horizontal lines, where * indicates p <0.05, ** indicates p < 0.01, and *** indicates p < 0.001") +
+  labs(caption ="Comparisons and their significance are denoted by the horizontal lines, where \n* indicates p <0.05, ** indicates p < 0.01, and *** indicates p < 0.001") +
   
   theme(
     axis.text = element_text(size = 11), # Increase axis text size
@@ -977,6 +999,12 @@ base_plot +
     axis.title.x = element_text(size = 14),
     axis.title.y = element_text(size = 14),
   )
+
+
+ggsave("full_boxplot_pm25.png", full_boxplot_pm25, width = 10, height = 8, dpi = 300)
+
+
+
 ```
 
 
@@ -1124,7 +1152,7 @@ base_plot <- pm10_community_hourly %>%
   labels = c("Evening Cooking Hours (4pm-8pm)", "Morning Cooking Hours (5am-9am)", "Control Hour (3am)", "Other Hours (Excluding Cooking \nand Control Hours)"))  # Add line breaks in legend labels
 
 ## NOTE: USED RESULTS FROM ANOVA AND TUKEY TESTS TO DETERMINE SIGNFICANCE STARTS. WILL NEED TO BE UPDATED DEPENEDING ON NEW DATA. 
-base_plot +
+full_boxplot_pm10 <- base_plot +
   geom_segment(aes(x = 0.72, xend = 0.90, y = 1400, yend = 1400), color = "black") +  # Harmattan 
   annotate("text", x = 0.81, y = 1410, label = "***") +
   
@@ -1167,7 +1195,7 @@ base_plot +
   geom_segment(aes(x = 1, xend = 2, y = 1560, yend = 1560), color = "black") +  # Harmattan vs Not Harmattan
   annotate("text", x = 1.5, y = 1575, label = "***") +
   
-  labs(caption ="Comparisons and their significance are denoted by the horizontal lines, where * indicates p <0.05, ** indicates p < 0.01, and *** indicates p < 0.001") +
+  labs(caption ="Comparisons and their significance are denoted by the horizontal lines, where \n* indicates p <0.05, ** indicates p < 0.01, and *** indicates p < 0.001") +
   
   theme(
     axis.text = element_text(size = 11), # Increase axis text size
@@ -1178,6 +1206,11 @@ base_plot +
     axis.title.x = element_text(size = 14),
     axis.title.y = element_text(size = 14),
   )
+
+
+
+ggsave("full_boxplot_pm10.png", full_boxplot_pm10, width = 10, height = 8, dpi = 300)
+
 ```
 
 

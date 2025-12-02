@@ -1,0 +1,926 @@
+---
+title: "Particulate Matter (PM) Data Prep"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(scipen=999)
+```
+
+### Document Summary
+
+This workflow follows the load_ghana_AQ_data.Rmd file and assumes that we have downloaded data from the cloud and/or obtained data from SD cards.
+
+In this workflow, we: 
+- ingest minutely PM data from two sources (QuantAQ cloud + SD card) 
+- merge them so gaps in the cloud are filled by SD 
+- compute monitor-specific calibration equations from colocation windows (if new colocation has occurred) 
+- apply those equations to all subsequent data 
+- export corrected minutely time series (pm1, pm2.5, pm10) with the raw values kept alongside 
+- calculate hourly & daily summaries with fleet averages and completeness checks - export hourly & daily summaries
+
+The current colocation windows can be found in calibration.yml 
+- Window 1 (original fleet): fit each monitor to the fleet average during its colocation window. 
+- Window 2 (new fleet): fit each new monitor against an already-calibrated reference monitor from the original fleet (e.g., MOD-PM-00884).
+
+### Prerequisites and expected folders
+
+Before you run anything: 
+- Put your YAML config at data_load_and_prep/calibration.yml (example below). 
+- Put device group CSVs (lists of monitor IDs) at data/new_fleet.csv and data/original_fleet.csv. Each CSV should have at least one column named monitor. 
+- Have SD card CSVs and the cloud CSV in the paths referenced in the code. (If your paths change later, only update them in the “load data” chunk.)
+
+**YAML example**: 
+thresholds:
+  min_active_monitors: 10
+  min_points: 1000
+  min_r2: 0.5
+
+colocation_windows:
+  - name: "window1_initial_fleet"
+    start: "2023-08-16"
+    end:   "2023-09-20"
+    monitors: "original_fleet"
+    reference_monitor: null
+
+  - name: "window2_new_monitors"
+    start: "2024-12-16"
+    end:   "2025-01-25"
+    monitors: "new_fleet"
+    reference_monitor: "MOD-PM-00884"
+
+### Load packages, source functions, and load YAML
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE}
+### load packages 
+
+library(here) # file path org
+library(lubridate)# working with dates
+library(tictoc) # timing
+library(DT) # datatables
+library(purrr) # applying functions across df
+library(tidyverse) # data cleaning and plotting
+library(data.table) 
+library(sf) # spatial data 
+library(viridis) # color pallete 
+library(knitr)
+library(modelsummary) # table of regressions
+library(spdep)
+library(gstat)
+library(units) 
+library(gridExtra)
+library(broom)
+library(Metrics) 
+library(kableExtra) # table creation
+library(GGally)
+library(yaml)
+
+# source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
+source(here("src", "load_pollution_datasets.R"))
+
+# source functions to merge in the SD card data for cases when server data is missing 
+source(here("src", "merge_sd_data.R"))
+
+# source function that merges cloud/sd card data for for multiple pollutants at once 
+source(here("src", "merge_cloud_sd_colocation_and_community.R"))
+
+# source function to apply regressions when comparing monitor to fleet average
+source(here("src", "compare_fleet_regression.R")) # INCLUDES apply_regression and run_regression_stats functions. 
+
+# source function that aggregates data by time scale of interest (hourly, daily)
+source(here("src", "summarize_pollution_times.R"))
+
+## load in the colocation window and calibration threshold yaml
+config <- yaml::read_yaml(here("data_load_and_prep", "calibration.yml"))
+
+# Should show the thresholds and two windows:
+str(config)
+```
+
+### Load the data (Cloud and SD)
+
+We load SD card CSVs, stack them, and label them as source = "sd_card".
+
+We also load cloud data once per pollutant using load_pollution_datasets() which returns a list with raw_cloud.
+
+Assumptions (should be satisfied if SD card data processed by QuantAQ and cloud data loaded and saved using previous workflow) 
+- SD card files contain timestamp_iso, monitor, and PM columns. 
+- Cloud file contains monitor, timestamp, date, hour, and the PM column being loaded.
+
+```{r}
+## LOAD SD CARD DATA ----
+full_sd_card1 <- read_csv(here("data", "all_measurements", "sd", "full_sd_card_2024-08-20_to_2025-01-29.csv")) %>%
+ mutate(source = "sd_card")
+
+full_sd_card2 <- read_csv(here("data", "all_measurements", "sd", "full_sd_card_2025-03-01_to_2025-09-01.csv")) %>%
+ mutate(source = "sd_card")
+
+full_sd_card <- bind_rows(full_sd_card1, full_sd_card2)
+
+
+
+# LOAD CLOUD DATA ---- 
+# List of pollutants
+pollutants <- c("pm1", "pm25", "pm10")
+
+file_path <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20240816_20250901.csv"
+
+# Load all cloud data in a structured way
+raw_data <- lapply(pollutants, function(pollutant) {
+  load_pollution_datasets(pollutant, file_path = file_path, file_type = "csv")
+})
+
+# Name the list by pollutant
+names(raw_data) <- pollutants
+```
+
+### Merge the cloud and SD data
+
+We left-join SD onto the cloud by monitor + timestamp and take: 
+- the cloud value when present, otherwise the SD value 
+- source column telling where the chosen value came from
+
+Expected output: 
+- A list of data frames for each pollutant specified. 
+- Each data frame with columns: monitor, timestamp, date, hour, <pollutant> (pm1, pm25, and pm10), source
+
+```{r}
+## MERGE THE SD DATA WITH THE SERVER DATA ---- 
+
+#  per-pollutant merge 
+merge_sd_data_one <- function(pollutant_data, sd_card_data, pollutant) {
+  if (!"source" %in% names(pollutant_data)) pollutant_data <- dplyr::mutate(pollutant_data, source = NA_character_)
+  if (!"source" %in% names(sd_card_data))  sd_card_data   <- dplyr::mutate(sd_card_data,   source = "sd_card")
+
+  joined <- dplyr::left_join(
+    pollutant_data,
+    sd_card_data,
+    by = c("timestamp" = "timestamp_iso", "monitor" = "monitor"),
+    suffix = c(".cloud", ".sd")
+  )
+
+  pol_cloud <- paste0(pollutant, ".cloud")
+  pol_sd    <- paste0(pollutant, ".sd")
+
+  joined %>%
+    dplyr::mutate(
+      !!rlang::sym(pollutant) := dplyr::coalesce(.data[[pol_cloud]], .data[[pol_sd]]),
+      source = dplyr::coalesce(
+        if ("source.cloud" %in% names(.)) .data[["source.cloud"]] else NA_character_,
+        if ("source.sd"    %in% names(.)) .data[["source.sd"]]    else NA_character_,
+        if ("source"       %in% names(.)) .data[["source"]]       else NA_character_
+      )
+    ) %>%
+    dplyr::select(monitor, timestamp, date, hour, !!rlang::sym(pollutant), source)
+}
+
+# loop over pollutants 
+merge_cloud_sd_all <- function(pollutants, raw_data, sd_card_data) {
+  setNames(lapply(pollutants, function(p) {
+    merge_sd_data_one(raw_data[[p]]$raw_cloud, sd_card_data, p)
+  }), pollutants)
+}
+
+
+## If no SD card. Merge with empty. 
+# full_sd_card <- tibble(
+#   timestamp_iso = as.POSIXct(character()),  # <dttm>
+#   co           = double(),
+#   no           = double(),
+#   no2          = double(),
+#   o3           = double(),
+#   pm1          = double(),
+#   pm10         = double(),
+#   pm25         = double(),
+#   monitor      = character(),
+#   source       = character()
+# )
+
+
+# Run it
+merged_results <- merge_cloud_sd_all(pollutants, raw_data, full_sd_card)
+
+# quick smoke tests
+stopifnot(all(pollutants %in% names(merged_results)))
+stopifnot(all(c("monitor","timestamp","date","hour","pm25","source") %in% names(merged_results$pm25)))
+```
+
+### Save the raw colocation data for reference
+
+```{r}
+## to pull correct ids
+get_monitor_ids <- function(group_name) {
+  if (is.null(group_name) || is.na(group_name)) return(NULL)
+  path <- here::here("data", paste0(group_name, ".csv"))
+  if (!file.exists(path)) return(NULL)
+  readr::read_csv(path, show_col_types = FALSE) %>%
+    dplyr::pull(monitor) %>%
+    unique()
+}
+
+# pull colocation window info
+w1 <- config$colocation_windows[[1]]
+w2 <- config$colocation_windows[[2]]
+
+# pull ids associated with colocation window of interest
+new_ids <- get_monitor_ids(w2$monitors)
+
+if (is.null(new_ids) || length(new_ids) == 0) {
+  stop("No monitor IDs found for '", w2$monitors, "'. Make sure data/new_fleet.csv exists and has a 'monitor' column.")
+}
+
+
+# filter to colocation time period and monitors in colocation
+pm1_colocation_merged_w2 <- merged_results$pm1 %>%
+  dplyr::filter(
+    date >= as.Date(w2$start),
+    date <= as.Date(w2$end),
+    monitor %in% new_ids
+  )
+
+pm25_colocation_merged_w2 <- merged_results$pm25 %>%
+  dplyr::filter(
+    date >= as.Date(w2$start),
+    date <= as.Date(w2$end),
+    monitor %in% new_ids
+  )
+
+pm10_colocation_merged_w2 <- merged_results$pm10 %>%
+  dplyr::filter(
+    date >= as.Date(w2$start),
+    date <= as.Date(w2$end),
+    monitor %in% new_ids
+  )
+
+# # Save output
+# write_csv(pm1_colocation_merged_w2, here("data", "pm", "colocation", "pm1_colocation_merged_w2_20241216-20250125.csv"))
+# 
+# write_csv(pm10_colocation_merged_w2, here("data", "pm", "colocation", "pm10_colocation_merged_w2_20241216-20250125.csv"))
+# 
+# write_csv(pm25_colocation_merged_w2, here("data", "pm", "colocation", "pm25_colocation_merged_w2_20241216-20250125.csv"))
+```
+
+## Save raw merged data for community
+
+We tag each row with: - fleet ("original","new","unknown") 
+- phase ("w1_colocation","w2_colocation","community","other") \~ filter to community or other to exclude colocation data
+
+If storage is tight, skip this step (the corrected data keeps a raw column, so the raw community only is not strictly necessary)
+
+```{r}
+# ---- helpers ----
+# If your get_monitor_ids has a dir argument, set it; otherwise move the CSVs to that dir.
+orig_ids <- get_monitor_ids(config$colocation_windows[[1]]$monitors)         # e.g. "original_fleet"
+new_ids  <- get_monitor_ids(config$colocation_windows[[2]]$monitors)          # e.g. "new_fleet"
+
+w1 <- config$colocation_windows[[1]]
+w2 <- config$colocation_windows[[2]]
+
+# Tag fleet + phase (colocation vs community) for any merged PM df
+tag_fleet_phase <- function(df) {
+  df %>%
+    dplyr::mutate(
+      fleet = dplyr::case_when(
+        monitor %in% orig_ids ~ "original",
+        monitor %in% new_ids  ~ "new",
+        TRUE                  ~ "unknown"
+      ),
+      phase = dplyr::case_when(
+        # window 1 (original fleet coloc)
+        fleet == "original" & date >= as.Date(w1$start) & date <= as.Date(w1$end) ~ "w1_colocation",
+        fleet == "original" & date >  as.Date(w1$end)                              ~ "community",
+
+        # window 2 (new fleet coloc)
+        fleet == "new"      & date >= as.Date(w2$start) & date <= as.Date(w2$end) ~ "w2_colocation",
+        fleet == "new"      & date >  as.Date(w2$end)                              ~ "community",
+
+        # anything before its coloc window or that doesn't fit neatly
+        TRUE ~ "other"
+      )
+    )
+}
+
+# ---- build tagged raw tables (per pollutant) ----
+pm1_raw_tagged  <- merged_results$pm1  %>% tag_fleet_phase()
+pm25_raw_tagged <- merged_results$pm25 %>% tag_fleet_phase()
+pm10_raw_tagged <- merged_results$pm10 %>% tag_fleet_phase()
+
+
+# COMMUNITY-ONLY exports (exclude coloc periods) for quick analysis:
+pm1_community_raw  <- pm1_raw_tagged  %>% dplyr::filter(phase %in% c("community", "other"))
+pm25_community_raw <- pm25_raw_tagged %>% dplyr::filter(phase %in% c("community", "other"))
+pm10_community_raw <- pm10_raw_tagged %>% dplyr::filter(phase %in% c("community", "other"))
+
+# Save output
+# readr::write_rds(pm25_community_raw, here::here("data","pm","raw","pm25_community_merged_20240816_20250901.rds"))
+# readr::write_rds(pm1_community_raw,  here::here("data","pm","raw","pm1_community_merged_20240816_20250901.rds"))
+# readr::write_rds(pm10_community_raw, here::here("data","pm","raw","pm10_community_merged_20240816_20250901.rds"))
+# 
+# write_csv(pm25_community_raw, here("data", "pm", "raw", "pm25_community_merged_20240816_20250901.csv"))
+# write_csv(pm1_community_raw, here("data", "pm", "raw", "pm1_community_merged_20240816_20250901.csv"))
+# write_csv(pm10_community_raw, here("data", "pm", "raw", "pm10_community_merged_20240816_20250901.csv"))
+```
+
+### Determine colocation correction equations and build calibration tables
+
+Run this section **only when a new colocation has happened** (e.g., adding a new fleet or re-colocating a reference). Otherwise skip and use your previously saved calibration tables.
+
+This section produces a calibration table per pollutant with one row per monitor that passed quality checks.
+- We later use this table to correct all minutely data with: corrected = (raw - intercept) / slope
+
+This section supports two mutually exclusive strategies, selected by the window’s reference_monitor in your YAML:
+
+1.  **Fleet-average method** (Window 1, original fleet)
+-   Build a fleet average time series each minute using all colocated monitors (or a specified group) when there are at least min_active_monitors reporting.
+-   For each monitor, regress monitor_raw \~ fleet_avg to get slope/intercept.
+
+2.  **Reference-monitor method** (Window 2, new fleet)
+-   used if a new fleet of monitors was colocated with a previously corrected monitor
+-   Correct *the reference* inside the *new window* using its most recent saved coefficients (from previous colocation).
+-   For each new monitor, regress monitor_raw \~ reference_corrected.
+
+**Inputs this section expects**
+-   merged_results[[p]] for each pollutant (pm1, pm25, pm10) with monitor, timestamp, date, hour, pollutant, source.
+-   config with thresholds and windows (your YAML).
+-   Group CSVs (e.g., data/original_fleet.csv, data/new_fleet.csv) with a column monitor.
+-   For vs-ref windows, the baseline calibration table for that pollutant (e.g., calibration_pm25_window1.csv) so we can correct the reference inside the new window.
+
+**Warning**
+-   PM 10 showed weaker linearity. If many PM10 rows fail the thresholds or look implausible (e.g., very large slopes, negative intercepts), you can:
+   - increase min_r2
+   - skip applying PM10 correction and keep PM10 raw (your apply step
+        already supports that if a coef is missing).
+
+**Common pitfalls**
+  - No rows produced — usually means there’s no temporal overlap between the reference and targets in the window, or thresholds are too strict.
+  - Reference has no prior baseline — Ensure the reference monitor appears in the calibration table for the pollutant, and that fitted_on (or colocation_end) is parseable.
+
+```{r}
+# Looks up a window (dates, monitor group, optional reference_monitor).
+get_window <- function(config, window_name) {
+  ws <- config$colocation_windows
+  ix <- which(vapply(ws, function(w) identical(w$name, window_name), logical(1)))
+  if (length(ix) != 1) stop("Window '", window_name, "' not found or ambiguous.")
+  ws[[ix]]
+}
+
+
+# For each minute (timestamp), compute the mean across active colocated monitors only if at least min_active_monitors have non-missing values.
+# Returns timestamp, n_active, fleet_avg (NA rows removed).
+compute_fleet_avg <- function(df, pollutant, min_active_monitors, restrict_ids = NULL) {
+  d <- if (is.null(restrict_ids)) df else dplyr::filter(df, monitor %in% restrict_ids)
+  d %>%
+    dplyr::group_by(timestamp) %>%
+    dplyr::summarise(
+      n_active = sum(!is.na(.data[[pollutant]])),
+      fleet_avg = ifelse(n_active >= min_active_monitors,
+                         mean(.data[[pollutant]], na.rm = TRUE),
+                         NA_real_),
+      .groups = "drop"
+    ) %>%
+    dplyr::filter(!is.na(fleet_avg))
+}
+
+
+# For each monitor, fit y \~ x (linear regression) and report slope, intercept, r2, rmse, and n_points (rows used in the fit).
+# Works for either mode because you pass in the appropriate x (fleet average or corrected reference) and y (monitor raw).
+fit_by_monitor <- function(df, y_var, x_var) {
+  df %>%
+    dplyr::filter(!is.na(.data[[y_var]]), !is.na(.data[[x_var]])) %>%
+    dplyr::group_by(monitor) %>%
+    dplyr::reframe({
+      fit <- lm(stats::reformulate(x_var, y_var), data = dplyr::cur_data())
+      tibble::tibble(
+        n_points  = nrow(dplyr::cur_data()),
+        slope     = unname(coef(fit)[[2]]),
+        intercept = unname(coef(fit)[[1]]),
+        r2        = summary(fit)$r.squared,
+        rmse      = sqrt(mean(stats::residuals(fit)^2))
+      )
+    }, .groups = "drop")
+}
+
+
+### FUNCTION TO FIND REGRESSION COEFFICIENTS WHEN USING FLEET AVERAGE ----
+# Slice the window dates; optionally restrict to a monitor group (e.g., original/new fleet).
+# Join each monitor’s series by timestamp to get pairs (y = monitor_raw, x = fleet_avg).
+# Run fit_by_monitor() and filter by min_points and min_r2.
+
+calibrate_window_fleet <- function(data_full, pollutant, window, thresholds) {
+  dfw <- dplyr::filter(data_full,
+                       date >= as.Date(window$start),
+                       date <= as.Date(window$end))
+  if (nrow(dfw) == 0L) return(tibble::tibble())
+
+  restrict_ids <- get_monitor_ids(window$monitors)
+
+  fleet <- compute_fleet_avg(dfw, pollutant,
+                             thresholds$min_active_monitors,
+                             restrict_ids)
+  if (nrow(fleet) == 0L) return(tibble::tibble())
+
+  reg_data <- dfw %>%
+    dplyr::select(monitor, timestamp, y = !!rlang::sym(pollutant)) %>%
+    dplyr::inner_join(fleet, by = "timestamp") %>%
+    dplyr::rename(x = fleet_avg)
+
+  if (nrow(reg_data) == 0L) return(tibble::tibble())
+
+  fit_by_monitor(reg_data, "y", "x") %>%
+    dplyr::filter(n_points >= thresholds$min_points,
+                  r2 >= thresholds$min_r2) %>%
+    dplyr::mutate(
+      pollutant = pollutant,
+      colocation_start = as.POSIXct(window$start, tz = "UTC"),
+      colocation_end   = as.POSIXct(window$end,   tz = "UTC"),
+      fitted_on        = Sys.Date(),
+      window_name      = window$name,
+      method = "fleet_avg",
+      reference_monitor = NA_character_
+    ) %>%
+    dplyr::select(monitor, pollutant, slope, intercept, r2, rmse, n_points,
+                  method, reference_monitor, colocation_start, colocation_end,
+                  fitted_on, window_name)
+}
+
+
+### FUNCTION TO FIND REGRESSION COEFFICIENTS WHEN USING REFERENCE MONITOR ----
+
+#Grab the reference_monitor from the window.
+# Select the most recent prior coefficients for that reference monitor and pollutant from baseline_cal_tbl
+# Slice the window; build reference_corrected within the window:
+# Restrict to target monitors (e.g., new_fleet) and join on timestamp to get pairs (y = monitor_raw, x = ref_corr).
+# Run fit_by_monitor(), apply quality filters, and add metadata (method = "coloc_vs_corrected_ref", plus the reference ID and window dates).
+
+calibrate_window_vs_ref <- function(data_full, pollutant, window, thresholds, baseline_cal_tbl) {
+  ref_id <- window$reference_monitor
+  if (is.null(ref_id) || is.na(ref_id)) {
+    stop("reference_monitor required for vs-ref method.")
+  }
+
+  # --- pick the MOST RECENT prior coef for the reference monitor ---
+  # We prefer `fitted_on` (a Date). If missing, fall back to `colocation_end`.
+  prior <- baseline_cal_tbl %>%
+    dplyr::filter(monitor == ref_id, pollutant == !!pollutant) %>%
+    dplyr::mutate(
+      .recency = dplyr::coalesce(as.Date(fitted_on), as.Date(colocation_end))
+    ) %>%
+    dplyr::arrange(dplyr::desc(.recency), dplyr::desc(n_points), dplyr::desc(r2)) %>%
+    dplyr::slice(1)
+
+  if (nrow(prior) != 1 || !is.finite(prior$slope) || prior$slope == 0) {
+    stop("Valid baseline coef not found for ", ref_id, " (", pollutant, ").")
+  }
+
+  # --- slice the window ---
+  dfw <- dplyr::filter(
+    data_full,
+    date >= as.Date(window$start),
+    date <= as.Date(window$end)
+  )
+  if (nrow(dfw) == 0L) return(tibble::tibble())
+
+  # --- build corrected reference within the window using prior coef ---
+  ref_corr <- dfw %>%
+    dplyr::filter(monitor == ref_id) %>%
+    dplyr::mutate(ref_corr = (.data[[pollutant]] - prior$intercept) / prior$slope) %>%
+    dplyr::select(timestamp, ref_corr)
+
+  if (nrow(ref_corr) == 0) {
+    stop("Reference ", ref_id, " has no data in window for ", pollutant, ".")
+  }
+
+  # --- limit targets to the specified group (if provided) ---
+  target_ids <- get_monitor_ids(window$monitors)
+  targets <- if (is.null(target_ids)) dfw else dplyr::filter(dfw, monitor %in% target_ids)
+
+  # --- assemble regression data (each target vs corrected reference) ---
+  reg_data <- targets %>%
+    dplyr::select(monitor, timestamp, y = !!rlang::sym(pollutant)) %>%
+    dplyr::inner_join(ref_corr, by = "timestamp") %>%
+    dplyr::rename(x = ref_corr)
+
+  if (nrow(reg_data) == 0L) return(tibble::tibble())
+
+  # --- fit per-monitor, filter for quality, and annotate metadata ---
+  fit_by_monitor(reg_data, "y", "x") %>%
+    dplyr::filter(n_points >= thresholds$min_points, r2 >= thresholds$min_r2) %>%
+    dplyr::mutate(
+      pollutant         = pollutant,
+      method            = "coloc_vs_corrected_ref",
+      reference_monitor = ref_id,
+      colocation_start  = as.POSIXct(window$start, tz = "UTC"),
+      colocation_end    = as.POSIXct(window$end,   tz = "UTC"),
+      fitted_on         = Sys.Date(),
+      window_name       = window$name
+    ) %>%
+    dplyr::select(
+      monitor, pollutant, slope, intercept, r2, rmse, n_points,
+      method, reference_monitor,
+      colocation_start, colocation_end, fitted_on, window_name
+    )
+}
+
+
+
+### FUNCTION TO IMPLEMENT THE REGRESSION FINDING FUNCTION ----
+
+# Dispatcher: reads the window and thresholds from config.
+# If reference_monitor is NULL → run fleet mode.
+# If reference_monitor is set → run vs-ref mode (and require baseline_cal_tbl).
+# Returns the finished calibration tibble for that window/pollutant.
+
+build_calibration_table_for <- function(merged_full,
+                                        pollutant,
+                                        config,
+                                        window_name,
+                                        baseline_cal_tbl = NULL) {
+  w  <- get_window(config, window_name)
+  th <- config$thresholds
+  
+  if (is.null(w$reference_monitor)) {
+    calibrate_window_fleet(merged_full, pollutant, w, th)
+  } else {
+    if (is.null(baseline_cal_tbl)) {
+      stop("baseline_cal_tbl required for vs-ref windows (", window_name, ").")
+    }
+    calibrate_window_vs_ref(merged_full, pollutant, w, th, baseline_cal_tbl)
+  }
+}
+
+
+# specify pollutants 
+pollutants <- c("pm1","pm25","pm10")
+
+# load calibration coefficients (for reference)
+cal_w1 <- list(
+  pm1  = readr::read_csv(here::here("data","calibration","calibration_pm1_window1.csv"),  show_col_types = FALSE),
+  pm25 = readr::read_csv(here::here("data","calibration","calibration_pm25_window1.csv"), show_col_types = FALSE),
+  pm10 = readr::read_csv(here::here("data","calibration","calibration_pm10_window1.csv"), show_col_types = FALSE)
+)
+
+# build the calibration table for each pollutant 
+cal_w2 <- purrr::map(pollutants, function(p) {
+  build_calibration_table_for(
+    merged_full      = merged_results[[p]],
+    pollutant        = p,
+    config           = config,
+    window_name      = "window2_new_monitors",
+    baseline_cal_tbl = cal_w1[[p]]   # <- use window1 coefs of the reference monitor
+  )
+}) %>% rlang::set_names(pollutants)
+
+# join window 1 and window 2 results 
+cal_master <- purrr::map(pollutants, function(p) {
+  dplyr::bind_rows(cal_w1[[p]], cal_w2[[p]])
+}) %>% rlang::set_names(pollutants)
+
+
+## INSPECT RESULTS: REMOVE BAD CALIBRATIONS (e.g. Slope implausibly low/high)
+print(cal_master$pm1, n = 65)
+print(cal_master$pm10, n = 65)
+print(cal_master$pm25, n = 65)
+
+
+# write_csv(cal_master$pm1, here::here("data","calibration", paste0("calibration_pm1.csv")))
+# write_csv(cal_master$pm10, here::here("data","calibration", paste0("calibration_pm10.csv")))
+# write_csv(cal_master$pm25, here::here("data","calibration", paste0("calibration_pm25.csv")))
+```
+
+## Apply correction equations for each monitor if available
+
+We first choose the most recent calibration row per monitor with pick_most_recent(), then join those coefs to the full minutely data and compute: corrected = (raw - intercept) / slope
+
+If a monitor has no coefficients, we keep the raw measurement and set a boolean flag column (e.g., calibrated_pm25 = FALSE)
+
+Save the full corrected output.
+
+Note: 
+The new colocation consistently shows slopes around 0.8 and intercepts between 6–15 µg/m³ When I apply these corrections, I’m seeing quite a few negative values at low PM raw concentrations.
+
+My hypothesis is that the reference monitor used for the second colocation (MOD-PM-00884) had the lowest slope (0.82) from the initial colocation fleet-average regression, suggesting it was somewhat less sensitive than the fleet average. When corrected, its PM readings are scaled up by roughly 20%, which may bias its behavior as a reference—especially after a year in the field and under different seasonal conditions (e.g., Harmattan). The second colocation also took place during Harmattan (higher concentrations and more variability), so the regression may not capture low-end behavior as well. Since the new colocations relied on this single reference rather than a fleet average, any bias in the reference is likely transferred to the new monitors. There may also be some inherent sensitivity differences between the older and newer monitors.
+
+```{r}
+library(rlang)
+
+apply_calibration <- function(df, cal_tbl, pollutant,
+                              add_raw_col = TRUE,
+                              calibrate_flag_col = "calibrated") {
+
+  # Use one local name for the flag
+  flag_col <- calibrate_flag_col
+
+  # 1) Keep only coefficients for THIS pollutant
+  coef_tbl <- cal_tbl %>%
+    dplyr::filter(.data$pollutant == pollutant) %>%
+    dplyr::select(monitor, slope, intercept)
+
+  # 2) Guard against accidental duplicates (should be one row per monitor)
+  if (coef_tbl %>% dplyr::count(monitor) %>% dplyr::filter(n > 1) %>% nrow() > 0) {
+    warning("Duplicate calibration rows per monitor for ", pollutant,
+            ". Keeping the first per monitor.")
+    coef_tbl <- coef_tbl %>% dplyr::distinct(monitor, .keep_all = TRUE)
+  }
+
+  # Dynamic names
+  flag_sym <- rlang::sym(flag_col)
+  raw_name <- paste0(pollutant, "_raw")
+  raw_sym  <- rlang::sym(raw_name)
+
+  out <- df %>%
+    # 3) Join coefficients; compute corrected only when coefficients are valid
+    dplyr::left_join(coef_tbl, by = "monitor") %>%
+    dplyr::mutate(
+      .raw        = .data[[pollutant]],
+      .valid_coef = !is.na(slope) & !is.na(intercept) & is.finite(slope) & (slope != 0),
+      .corrected  = dplyr::if_else(.valid_coef, (.raw - intercept) / slope, .raw),
+      !!flag_sym  := .valid_coef & !is.na(.raw)
+    ) %>%
+    {
+      # 4) Optionally add "<pollutant>_raw" for transparency
+      if (add_raw_col) dplyr::mutate(., !!raw_sym := .raw) else .
+    } %>%
+    # 5) Overwrite the pollutant column with corrected values (avoids duplicate name)
+    dplyr::mutate(!!pollutant := .corrected) %>%
+    # 6) Keep tidy set of columns (drop helpers by not selecting them)
+    {
+      base_cols <- c("monitor","timestamp","date","hour","source", flag_col)
+      extra     <- if (add_raw_col) raw_name else character(0)
+      dplyr::select(., dplyr::all_of(c(base_cols, extra, pollutant)))
+    }
+
+  out
+}
+
+
+
+cal_pm1  <- readr::read_csv(here::here("data","calibration","calibration_pm1.csv"),  show_col_types = FALSE)
+cal_pm25 <- readr::read_csv(here::here("data","calibration","calibration_pm25.csv"), show_col_types = FALSE)
+cal_pm10 <- readr::read_csv(here::here("data","calibration","calibration_pm10.csv"), show_col_types = FALSE)
+
+
+pick_most_recent <- function(cal_tbl, pollutant) {
+  cal_tbl %>%
+    dplyr::filter(.data$pollutant == pollutant) %>%
+    dplyr::mutate(
+      .recency = dplyr::coalesce(as.Date(fitted_on), as.Date(colocation_end))
+    ) %>%
+    dplyr::arrange(monitor, dplyr::desc(.recency), dplyr::desc(n_points), dplyr::desc(r2)) %>%
+    dplyr::distinct(monitor, .keep_all = TRUE) %>%
+    dplyr::select(-.recency)
+}
+
+coef_pm25 <- pick_most_recent(cal_pm25, "pm25")
+
+pm25_merged <- merged_results$pm25
+
+pm25_corrected <- apply_calibration(
+  df = pm25_merged,
+  cal_tbl = coef_pm25,
+  pollutant = "pm25",
+  add_raw_col = TRUE,        # keep pm25_raw alongside corrected pm25
+  calibrate_flag_col = "calibrated_pm25" # TRUE if corrected, FALSE if kept raw
+)
+
+
+coef_pm1 <- pick_most_recent(cal_pm1, "pm1")
+
+pm1_merged <- merged_results$pm1
+
+pm1_corrected <- apply_calibration(
+  df = pm1_merged,
+  cal_tbl = coef_pm1,
+  pollutant = "pm1",
+  add_raw_col = TRUE,        # keep pm1_raw alongside corrected pm1
+  calibrate_flag_col = "calibrated_pm1" # TRUE if corrected, FALSE if kept raw
+)
+
+
+coef_pm10 <- pick_most_recent(cal_pm10, "pm10")
+
+pm10_merged <- merged_results$pm10 
+
+pm10_corrected <- apply_calibration(
+  df = pm10_merged,
+  cal_tbl = coef_pm10,
+  pollutant = "pm10",
+  add_raw_col = TRUE,        # keep pm10_raw alongside corrected pm10
+  calibrate_flag_col = "calibrated_pm10" # TRUE if corrected, FALSE if kept raw
+)
+
+
+
+## SAVE THE CORRECTED OUTPUT 
+# 
+# write_csv(pm1_corrected, here("data", "pm", "final", "pm1_corrected_20240816_20250901.csv"))
+# 
+# write_csv(pm10_corrected, here("data", "pm", "final", "pm10_corrected_20240816_20250901.csv"))
+# 
+# write_csv(pm25_corrected, here("data", "pm", "final", "pm25_corrected_20240816_20250901.csv"))
+# 
+# write_rds(pm1_corrected, here("data", "pm", "final", "pm1_corrected_20240816_20250901.rds"))
+# 
+# write_rds(pm10_corrected, here("data", "pm", "final", "pm10_corrected_20240816_20250901.rds"))
+# 
+# write_rds(pm25_corrected, here("data", "pm", "final", "pm25_corrected_20240816_20250901.rds"))
+
+
+## CREATE CORRECTED FULL DATASET
+
+pm25_keep <- pm25_corrected %>%
+  select(monitor, timestamp, pm25, pm25_raw, calibrated_pm25, source_pm25 = source)
+
+pm1_keep <- pm1_corrected %>%
+  select(monitor, timestamp, pm1, pm1_raw, calibrated_pm1, source_pm1 = source)
+
+pm10_keep <- pm10_corrected %>%
+  select(monitor, timestamp, pm10, pm10_raw, calibrated_pm10, source_pm10 = source)
+
+# Full-join across pollutants on monitor+timestamp
+corrected_full <- list(pm25_keep, pm1_keep, pm10_keep) %>%
+  reduce(full_join, by = c("monitor", "timestamp")) %>%
+  mutate(
+    date = as.Date(timestamp),
+    hour = lubridate::hour(timestamp),
+    # optional unified source if you want a single column:
+    source_any = coalesce(source_pm25, source_pm1, source_pm10)
+  ) %>%
+  # put columns in a nice order
+  relocate(monitor, timestamp, date, hour)
+
+# 
+# write_rds(corrected_full, here("data", "pm", "final", "corrected_full_data_20240816-20240901.rds"))
+
+
+```
+
+### summarize the data based on corrected values
+
+summarize_pollution_times() enforces completeness:
+  - Hourly mean requires ≥ 45 min present (75%)
+  - Daily mean requires ≥ 18 hours present (75%)
+  - Fleet average requires ≥ 10 active monitors in the hour/day
+
+It returns a list with hourly and daily, each including both per-monitor means and a fleet average column.
+
+```{r}
+original_fleet <- read_csv(here("data", "original_fleet.csv")) 
+new_fleet <- read_csv(here("data", "new_fleet.csv")) 
+
+## Here, I set implausibly low readings to NAs. Could update workflow so this is done above before saving corrected data. 
+
+pm1_corrected <- read_rds(here("data", "pm", "final", "pm1_corrected_20240816_20250901.rds")) %>%
+  mutate(pm1 = if_else(pm1 < 1, NA_real_, pm1),
+         pm1_raw = if_else(pm1_raw < 1, NA_real_, pm1_raw))
+
+
+pm1_clean <- pm1_corrected %>%
+  mutate(
+    pm1_data_summarize = if_else(
+      monitor %in% original_fleet$monitor,
+      pm1,        # corrected values if in original fleet 
+      pm1_raw     # raw values for new fleet. correction equation was leading to a lot of negative readings. 
+    )
+  )
+
+
+pm10_corrected <- read_rds(here("data", "pm", "final", "pm10_corrected_20240816_20250901.rds")) %>%
+  mutate(pm10 = if_else(pm10 < 1, NA_real_, pm10),
+         pm10_raw = if_else(pm10_raw < 1, NA_real_, pm10_raw))
+
+pm10_clean <- pm10_corrected %>%
+  mutate(
+    pm10_data_summarize = if_else(
+      monitor %in% original_fleet$monitor,
+      pm10,        # corrected values if in original fleet 
+      pm10_raw     # raw values for new fleet
+    )
+  )
+
+
+pm25_corrected <- read_rds(here("data", "pm", "final", "pm25_corrected_20240816_20250901.rds")) %>%
+  mutate(pm25 = if_else(pm25 < 1, NA_real_, pm25),
+         pm25_raw = if_else(pm25_raw < 1, NA_real_, pm25_raw))
+
+pm25_clean <- pm25_corrected %>%
+  mutate(
+    pm25_data_summarize = if_else(
+      monitor %in% original_fleet$monitor,
+      pm25,        # corrected values if in original fleet 
+      pm25_raw     # raw values for new fleet
+    )
+  )
+
+
+
+
+summarized_pm1 <- summarize_pollution_times(
+  pm1_clean, "pm1_data_summarize",
+  min_minutes_per_hour = 45,
+  min_hours_per_day   = 18,
+  min_active_monitors = 10
+)
+
+
+summarized_pm10 <- summarize_pollution_times(
+  pm10_clean, "pm10_data_summarize",
+  min_minutes_per_hour = 45,
+  min_hours_per_day   = 18,
+  min_active_monitors = 10
+)
+
+summarized_pm25 <- summarize_pollution_times(
+  pm25_clean, "pm25_data_summarize",
+  min_minutes_per_hour = 45,
+  min_hours_per_day   = 18,
+  min_active_monitors = 10
+)
+
+
+pm1_community_hourly <- summarized_pm1$hourly %>% 
+  rename(mean_pm1 = mean_pm1_data_summarize,
+         fleet_average_pm1 = fleet_average_pm1_data_summarize)
+
+pm1_community_daily <- summarized_pm1$daily %>% 
+  rename(mean_pm1 = mean_pm1_data_summarize,
+         fleet_average_pm1 = fleet_average_pm1_data_summarize)
+
+pm25_community_hourly <- summarized_pm25$hourly %>% 
+  rename(mean_pm25 = mean_pm25_data_summarize,
+         fleet_average_pm25 = fleet_average_pm25_data_summarize)
+
+pm25_community_daily <- summarized_pm25$daily %>% 
+  rename(mean_pm25 = mean_pm25_data_summarize,
+         fleet_average_pm25 = fleet_average_pm25_data_summarize)
+
+pm10_community_hourly <- summarized_pm10$hourly %>% 
+  rename(mean_pm10 = mean_pm10_data_summarize,
+         fleet_average_pm10 = fleet_average_pm10_data_summarize)
+
+pm10_community_daily <- summarized_pm10$daily %>%
+  rename(mean_pm10 = mean_pm10_data_summarize,
+         fleet_average_pm10 = fleet_average_pm10_data_summarize)
+```
+
+### Save the summarized output for analysis
+
+```{r}
+# Save as CSV
+# write_csv(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.csv"))
+# write_csv(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.csv"))
+# write_csv(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.csv"))
+# 
+# write_csv(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20250901.csv"))
+# write_csv(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20250901.csv"))
+# write_csv(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20250901.csv"))
+# 
+# 
+# # Save as RDS
+# write_rds(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.rds"))
+# write_rds(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.rds"))
+# write_rds(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.rds"))
+# 
+# write_rds(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20250901.rds"))
+# write_rds(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20250901.rds"))
+# write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20250901.rds"))
+
+```
+
+
+```{r}
+# pm25_community_hourly <- pm25_community_hourly %>%
+#   select(monitor, date, hour, mean_pm25)
+# 
+# pm1_community_hourly <- pm1_community_hourly %>%
+#   select(monitor, date, hour, mean_pm1)
+# 
+# pm10_community_hourly <- pm10_community_hourly %>%
+#   select(monitor, date, hour, mean_pm10)
+# 
+# full_hourly_summary <- left_join(pm25_community_hourly, pm1_community_hourly, by = c("monitor", "date", "hour")) %>%
+#   left_join(pm10_community_hourly, by = c("monitor", "date", "hour"))
+# 
+# write_csv(full_hourly_summary, here("data", "pm", "summarized", "modpm00884_hourly_20250901-20251115.csv"))
+# 
+# 
+# pm25_community_daily <- pm25_community_daily %>%
+#   select(monitor, date, mean_pm25)
+# 
+# pm1_community_daily <- pm1_community_daily %>%
+#   select(monitor, date, mean_pm1)
+# 
+# pm10_community_daily <- pm10_community_daily %>%
+#   select(monitor, date, mean_pm10)
+# 
+# full_daily_summary <- left_join(pm25_community_daily, pm1_community_daily, by = c("monitor", "date")) %>%
+#   left_join(pm10_community_daily, by = c("monitor", "date"))
+# 
+# write_csv(full_daily_summary, here("data", "pm", "summarized", "modpm00884_daily_20250901-20251115.csv"))
+
+```
+

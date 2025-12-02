@@ -140,7 +140,7 @@ ggplot(sd_weekly_filled, aes(x = week, y = monitor, fill = days_with_data)) +
 ### ADDING CLOUD DATA ----
 
 # load in the full cloud dataset 
-final_result_df <- readRDS(here("data" , "all_measurements", "cloud", "processed_monitor_data_20230815-20240816.rds"))
+final_result_df <- readRDS(here("data" , "all_measurements", "cloud", "processed_monitor_data_20250301_20250901.rds"))
 
 # to decrease file size, select columns of interest and remove rows where pm25 is NA
 cloud_df <- final_result_df %>% 
@@ -161,7 +161,7 @@ cloud_df_daily <- cloud_df_hourly %>%
   group_by(monitor, date) %>%
   summarise(complete_hours = sum(hour_complete_cloud, na.rm = TRUE)) %>%  # Count complete hours in each day
   ungroup() %>%
-  mutate(day_complete_enough = ifelse(complete_hours > 12, 1, 0))  # Flag complete days
+  mutate(day_complete_enough = ifelse(complete_hours > 18, 1, 0))  # Flag complete days
 
 
 # add a week column, count number of complete days per week
@@ -171,6 +171,9 @@ cloud_df_weekly <- cloud_df_daily %>%
   summarise(days_with_data = sum(day_complete_enough, na.rm = TRUE)) %>%
   ungroup()
 
+
+all_monitor_weeks <- expand.grid(monitor = unique(monitor_data_filtered$monitor),
+                                 week = monitor_data_filtered$week)
 
 cloud_weekly_filled <- all_monitor_weeks %>%
   left_join(cloud_df_weekly, by = c("monitor", "week")) %>%
