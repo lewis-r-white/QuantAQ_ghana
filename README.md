@@ -30,7 +30,7 @@ QuantAQ_ghana/
 ├── data/                         # Raw, merged, final & summarized datasets (not in GitHub)
 │
 ├── data_load_and_prep/           # Main ETL workflows (RMarkdown)
-│   ├── load_data_from_cloud_API.Rmd
+│   ├── download_cloud_and_load_processed_sd_data.Rmd
 │   ├── pm_data_prep.Rmd
 │   ├── gas_data_prep.Rmd
 │   ├── weather_data_prep.Rmd
@@ -65,7 +65,7 @@ Most collaborators will want to run workflows in this order:
 
 ### **1. Load Data (Cloud data from API)**
 
-`data_load_and_prep/load_data_from_cloud_API.Rmd`
+`data_load_and_prep/download_cloud_and_load_processed_sd_data.Rmd`
 
 -   Downloads QuantAQ data via API
 
