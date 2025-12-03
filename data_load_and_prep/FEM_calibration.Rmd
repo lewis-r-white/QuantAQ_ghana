@@ -77,7 +77,7 @@ enet_model <- read_rds(here("data", "calibration", "modulair_grimm_enet_model.rd
 ## apply the predictions and save calibrated data
 
 ```{r}
-modulair_preds <- enet_model %>%
+modulair_preds <- calib_model %>%
   predict(new_data = modulair_full) %>%
   rename(pm25_fem_calibrated = .pred) %>%
   bind_cols(modulair_full)
@@ -91,8 +91,10 @@ plot_df <- modulair_preds %>%
 ggplot(plot_df, aes(x = mod_pm25, y = pm25_fem_calibrated, color = season)) +
   geom_point(alpha = 0.3, size = 1) +
   geom_abline(slope = 1, intercept = 0) +
-  coord_equal() +
-  theme_minimal()
+  theme_minimal() +
+  labs(x = "Modulair PM 2.5 readings",
+       y = "GRIMM calibrated predictions",
+       title = "XGBoost GRIMM calibrated predictions of PM")
 
 ## Save calibrated data
 write_rds(

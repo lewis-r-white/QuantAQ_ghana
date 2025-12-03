@@ -40,9 +40,6 @@ library(yaml)
 # source in function that loads each pollution dataset separately to keep data small and prevent R crashes 
 source(here("src", "load_pollution_datasets.R"))
 
-# source functions to merge in the SD card data for cases when server data is missing 
-source(here("src", "merge_sd_data.R"))
-
 # source function that merges cloud/sd card data for for multiple pollutants at once 
 source(here("src", "merge_cloud_sd_colocation_and_community.R"))
 

@@ -106,11 +106,6 @@ modulair_full <- full_join(modulair_pm_hourly, modulair_weather_hourly, by = c("
 ```
 
 
-```{r}
-hist(modulair_full$mod_pm25) # check out distribution
-```
-
-
 ## Load in the GRIMM data 
 
 ```{r}
@@ -118,6 +113,14 @@ grimm_full <- read_csv(here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_2025
   mutate(hour = hour(date_hour)) %>%
   select(date_hour, date, hour, everything())
 ```
+
+
+```{r}
+# check out distributions
+hist(modulair_full$mod_pm25) 
+hist(grimm_full$grimm_pm25)
+```
+
 
 ## Merge modular and GRIMM data 
 
@@ -136,14 +139,14 @@ mod_grimm_full <- inner_join(modulair_full, grimm_full, by = c("date_hour", "dat
 
 ```{r}
 metrics_df <- mod_grimm_full %>%
-  yardstick::metrics(truth = grimm_pm25, estimate = mod_pm10)
+  yardstick::metrics(truth = grimm_pm25, estimate = mod_pm25)
 
 rmse_val <- metrics_df %>% filter(.metric == "rmse") %>% pull(.estimate)
 rsq_val  <- metrics_df %>% filter(.metric == "rsq") %>% pull(.estimate)
 
 
 mod_grimm_full %>%
-  ggplot(aes(x = grimm_pm25, y = mod_rh)) +
+  ggplot(aes(x = grimm_pm25, y = mod_pm25)) +
   geom_point(alpha = 0.3) +
   geom_abline(slope = 1, intercept = 0, color = "red") +
   annotate(
@@ -159,10 +162,9 @@ mod_grimm_full %>%
   labs(
     x = "GRIMM: PM 2.5",
     y = "MOD-PM-00884: PM 2.5",
-    title = "Baseline comparison of GRIMM \n+ reference Modulair PM 2.5",
+    title = "Baseline comparison of GRIMM + reference Modulair PM 2.5",
     subtitle = "Red line shows slope 1"
   ) 
-
 ```
 
 
