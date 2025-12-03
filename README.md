@@ -23,13 +23,11 @@ It includes workflows to:
 ```         
 QuantAQ_ghana/
 │
-├── README.md                     # High-level overview (this file)
-├── docs/                         # Detailed documentation & pipeline descriptions
-│   └── quantAQ_pipeline_overview.md
+├── README.md                     # High-level overview 
 │
 ├── data/                         # Raw, merged, final & summarized datasets (not in GitHub)
 │
-├── data_load_and_prep/           # Main ETL workflows (RMarkdown)
+├── data_load_and_prep/           # Main cleaning workflows (RMarkdown)
 │   ├── download_cloud_and_load_processed_sd_data.Rmd
 │   ├── pm_data_prep.Rmd
 │   ├── gas_data_prep.Rmd
