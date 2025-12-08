@@ -356,6 +356,158 @@ ggarrange(plotlist = plot_list, ncol = 5, nrow = 5)
 
 
 
+### Determine colocation correction equations and build calibration tables
+
+**Run this section only if you want to update or recompute calibration equations** (e.g., new colocations, revised thresholds, new monitors).
+
+If no new calibration is needed, skip this entire section — the next step (“Apply correction equations…”) will automatically load your most recent saved calibration tables from the data/calibration folder. 
+
+If a new calibration is needed, adjust the dates to align with the new colocation window and re-run. 
+
+This section produces a calibration table per gas with one row per monitor that passed quality checks.
+- We later use this table to correct all minutely data with: corrected = (raw - intercept) / slope
+
+With gases, we set up the regressions to compare each monitor's measurement to "golden monitor" selected from the diagnostic plots/tables in the previous section. We also call this the reference monitor method. 
+
+**Reference-monitor method** (Gas specific) 
+-   For each new monitor, regress monitor_raw \~ reference.
+-   Any new monitors added to the fleet should be colocated with the "golden monitor" 
+
+**Inputs this section expects**
+-   merged_results[[p]] for each gas (o3, no2, no, co) with monitor, timestamp, date, hour, gas, source.
+-   config with thresholds and windows (your YAML).
+
+**Warning**
+-   The gas readings do not always appear to be stable. Carefully examine the regression plots. 
+
+**Common pitfalls**
+  - No rows produced — usually means there’s no temporal overlap between the reference and targets in the window, or thresholds are too strict.
+  - Reference has no prior baseline — Ensure the reference monitor appears in the calibration table for the pollutant, and that fitted_on (or colocation_end) is parseable.
+
+```{r}
+# Purpose: Build gas calibration slopes/intercepts using the colocation period only. Run ONLY when:
+#  - a new golden monitor is chosen
+#  - the colocation window changes
+#  - new monitors are added to the gas fleet
+
+# Output:
+#   data/calibration/gas_calibration_table_coefs.csv
+
+source(here("src", "merge_sd_data_gas.R"))
+source(here("src", "load_pollution_datasets.R"))
+
+### Pull data from golden monitor 
+
+# This section extracts hourly gas concentrations from the monitor chosen as the “golden monitor” (here, MOD-00397) during the colocation period.
+
+# We join this reference time series back onto the colocation dataset so each monitor can be regressed against the same reference measurements.
+
+# If the golden monitor choice has already been validated (via correlations or prior work), you can update the monitor ID here directly without re-running the diagnostic plots.
+
+get_reference_data <- function(colocation_data, monitor_id, gases) {
+  ref_cols <- paste0("reference_", gases)
+  
+  colocation_data %>%
+    filter(monitor == monitor_id) %>%
+    select(timestamp, all_of(gases)) %>%
+    rename_with(~ ref_cols, all_of(gases))
+}
+
+
+
+
+## Fit Calibration Regressions (Determine the correction equation)
+
+# For each gas and for each monitor in the colocation period, we estimate a simple linear calibration model:
+#  - Monitor Gas = 𝛼 + 𝛽 × Reference Gas
+
+# These slopes and intercepts are then used to correct all community-period gas values.
+get_gas_regression_results <- function(colocation_with_ref,
+                                       gases,
+                                       reference_gases,
+                                       min_points,
+                                       min_r2) {
+  results_list <- list()
+  
+  for (mon in unique(colocation_with_ref$monitor)) {
+    monitor_data <- colocation_with_ref %>% filter(monitor == mon)
+    
+    for (i in seq_along(gases)) {
+      gas           <- gases[i]
+      reference_gas <- reference_gases[i]
+      
+      valid_data <- monitor_data %>%
+        filter(!is.na(.data[[gas]]),
+               !is.na(.data[[reference_gas]]))
+      
+      if (nrow(valid_data) >= min_points) {
+        model <- lm(as.formula(paste(gas, "~", reference_gas)), data = valid_data)
+        r2    <- summary(model)$r.squared
+        
+        if (!is.na(r2) && r2 >= min_r2) {
+          results_list[[length(results_list) + 1]] <- tibble(
+            monitor   = mon,
+            gas       = gas,
+            slope     = coef(model)[[2]],
+            intercept = coef(model)[[1]],
+            R2        = r2
+          )
+        } else {
+          # Not enough linear relationship / poor fit
+          results_list[[length(results_list) + 1]] <- tibble(
+            monitor   = mon,
+            gas       = gas,
+            slope     = NA_real_,
+            intercept = NA_real_,
+            R2        = r2
+          )
+        }
+      } else {
+        # Not enough paired points
+        results_list[[length(results_list) + 1]] <- tibble(
+          monitor   = mon,
+          gas       = gas,
+          slope     = NA_real_,
+          intercept = NA_real_,
+          R2        = NA_real_
+        )
+      }
+    }
+  }
+  
+  bind_rows(results_list)
+}
+
+
+# Load colocation gas
+colocation_gas <- read_rds(here("data", "gas", "colocation", "colocation_gas_20230815-20231025.rds"))
+
+gases <- c("co", "no", "no2", "o3")
+
+gas_cfg      <- config$gas_calibration
+gas_thresh   <- gas_cfg$thresholds
+min_points   <- gas_thresh$min_points   # e.g., 500
+min_r2       <- gas_thresh$min_r2       # e.g., 0.5
+
+
+reference_data <- get_reference_data(colocation_gas, "MOD-00397", gases)
+
+colocation_with_ref <- left_join(colocation_gas, reference_data, by = "timestamp")
+
+regression_results <- get_gas_regression_results(
+  colocation_with_ref,
+  gases,
+  paste0("reference_", gases),
+  min_points = min_points,
+  min_r2     = min_r2
+)
+
+
+write_csv(
+  regression_results,
+  here("data", "calibration", "gas_calibration_table_coefs.csv")
+)
+```
 
 ## Apply Calibration to Community Data
 Here we apply the slope and intercept from the calibration equations to all community-period observations (i.e., after the colocation window).
@@ -364,7 +516,6 @@ For each gas: Corrected= (Raw−α)/β
 
 ### Apply the correction equation 
 
-If new monitors are added or a new golden monitor is chosen, run src/01_build_gas_calibration.R to regenerate the calibration table before running this workflow.
 
 ```{r}
 # load the calibration coefficient table 
@@ -404,7 +555,7 @@ corrected_community_gas <- apply_gas_correction(gas_full %>% filter(date >= as.D
 ```
 
 
-### summarize the data
+### Summarize the data
 
 ```{r}
 summarize_corrected_gases <- function(corrected_data, gases) {
