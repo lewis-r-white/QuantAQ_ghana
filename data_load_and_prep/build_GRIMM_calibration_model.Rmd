@@ -62,13 +62,19 @@ modulair_pm_10_hourly <- read_csv(here("data", "pm", "summarized", "pm10_communi
 batch1_pm_00884_hourly <- left_join(modulair_pm_25_hourly, modulair_pm_1_hourly, by = c("monitor", "date", "hour")) %>%
   left_join(modulair_pm_10_hourly, by = c("monitor", "date", "hour"))
 
+# 
+# batch1_pm_00884_hourly <- read_csv(here("data", "pm", "summarized", "modpm00884_raw_hourly_20250801-20250901.csv")) %>%
+#   rename(mean_pm1 = mean_pm1_raw,
+#          mean_pm10 = mean_pm10_raw,
+#          mean_pm25 = mean_pm25_raw) %>%
+#   filter(!is.na(mean_pm25))
+
+
 batch2_pm_00884_hourly <- read_csv(here("data", "pm", "summarized", "modpm00884_hourly_20250901-20251115.csv")) %>%
   filter(!is.na(mean_pm25))
 
-
 modulair_pm_hourly <- bind_rows(batch1_pm_00884_hourly, batch2_pm_00884_hourly) %>%
   distinct(date, hour, .keep_all = TRUE) # remove overlapping day of sept 1
-
 
 
 
@@ -160,8 +166,8 @@ mod_grimm_full %>%
   ) +
   theme_minimal() +
   labs(
-    x = "GRIMM: PM 2.5",
-    y = "MOD-PM-00884: PM 2.5",
+    x = "GRIMM PM 2.5",
+    y = "RAW MOD-PM-00884 PM 2.5",
     title = "Baseline comparison of GRIMM + reference Modulair PM 2.5",
     subtitle = "Red line shows slope 1"
   ) 
@@ -235,14 +241,25 @@ collect_metrics(enet_last)
 
 enet_preds <- collect_predictions(enet_last)
 
+
 ggplot(enet_preds, aes(x = grimm_pm25, y = .pred)) +
   geom_point(alpha = 0.5) +
   geom_abline(slope = 1, intercept = 0, color = "red") +
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste0("RMSE: ", round(rmse_val, 2), 
+                   "\nR²: ", round(rsq_val, 2)),
+    size = 4,
+    label.size = .1
+  ) +
   coord_equal() +
   labs(
     title = "Elastic Net: Observed vs Predicted PM2.5 (Test Set)",
     x = "Observed PM2.5 (GRIMM)",
-    y = "Predicted PM2.5 (Elastic Net)"
+    y = "Predicted PM2.5 (Elastic Net)",
+    subtitle = "Red line shows slope 1"
   ) +
   theme_minimal()
 

@@ -13,7 +13,7 @@ colocation_windows:
     start: "2024-12-16"
     end:   "2025-01-25"
     monitors: "new_fleet"
-    reference_monitor: "MOD-PM-00884" # from original fleet
+    reference_monitor: null #"MOD-PM-00884" # from original fleet
 
 gas_calibration:
   reference_monitor: "MOD-00397"  # picked this from the plots (seemed representative and was selected as "golden monitor")

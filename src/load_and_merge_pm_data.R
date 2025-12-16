@@ -58,17 +58,37 @@ load_sd_card_data <- function(sd_paths) {
 
 
 # LOAD CLOUD DATA -------
+# load_cloud_data <- function(pollutants, cloud_path) {
+#   raw <- lapply(pollutants, function(p) {
+#     load_pollution_datasets(
+#       pollutant = p,
+#       file_path = cloud_path,
+#       file_type = "csv"
+#     )
+#   })
+#   names(raw) <- pollutants
+#   raw
+# }
+
 load_cloud_data <- function(pollutants, cloud_path) {
   raw <- lapply(pollutants, function(p) {
-    load_pollution_datasets(
+    out <- load_pollution_datasets(
       pollutant = p,
       file_path = cloud_path,
       file_type = "csv"
     )
+    
+    out$raw_cloud <- out$raw_cloud %>%
+      mutate(source = "cloud")
+    
+    out
   })
+  
   names(raw) <- pollutants
   raw
 }
+
+
 
 # MERGE POLLUTANTS: per-pollutant merge
 merge_sd_data_one <- function(pollutant_data, sd_card_data, pollutant) {
@@ -91,7 +111,13 @@ merge_sd_data_one <- function(pollutant_data, sd_card_data, pollutant) {
   if (!"source" %in% names(sd_card_data))
     sd_card_data <- sd_card_data %>% mutate(source = "sd_card")
   
-  joined <- left_join(
+  # joined <- left_join(
+  #   pollutant_data,
+  #   sd_card_data,
+  #   by = c("timestamp" = "timestamp_iso", "monitor" = "monitor"),
+  #   suffix = c(".cloud", ".sd")
+  
+  joined <- full_join(
     pollutant_data,
     sd_card_data,
     by = c("timestamp" = "timestamp_iso", "monitor" = "monitor"),
@@ -101,16 +127,28 @@ merge_sd_data_one <- function(pollutant_data, sd_card_data, pollutant) {
   pol_cloud <- paste0(pollutant, ".cloud")
   pol_sd    <- paste0(pollutant, ".sd")
   
+  # joined %>%
+  #   mutate(
+  #     !!rlang::sym(pollutant) := coalesce(.data[[pol_cloud]], .data[[pol_sd]]),
+  #     source = coalesce(
+  #       .data[["source.cloud"]],
+  #       .data[["source.sd"]],
+  #       .data[["source"]]
+  #     )
+  #   ) %>%
+  #   select(monitor, timestamp, date, hour, !!rlang::sym(pollutant), source)
+  
   joined %>%
     mutate(
       !!rlang::sym(pollutant) := coalesce(.data[[pol_cloud]], .data[[pol_sd]]),
       source = coalesce(
-        .data[["source.cloud"]],
-        .data[["source.sd"]],
-        .data[["source"]]
+        if ("source.cloud" %in% names(.)) .data[["source.cloud"]] else NA_character_,
+        if ("source.sd" %in% names(.))    .data[["source.sd"]]    else NA_character_,
+        if ("source" %in% names(.))       .data[["source"]]       else NA_character_
       )
     ) %>%
     select(monitor, timestamp, date, hour, !!rlang::sym(pollutant), source)
+  
 }
 
 

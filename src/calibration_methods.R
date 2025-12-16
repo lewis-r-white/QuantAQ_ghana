@@ -38,7 +38,16 @@ calibrate_window_fleet <- function(data_full, pollutant, window, thresholds) {
                              restrict_ids)
   if (nrow(fleet) == 0L) return(tibble::tibble())
   
-  reg_data <- dfw %>%
+  
+  target_ids <- get_monitor_ids(window$monitors)
+  
+  targets <- if (is.null(target_ids)) {
+    dfw
+  } else {
+    dfw %>% dplyr::filter(monitor %in% target_ids)
+  }
+  
+  reg_data <- targets %>%
     dplyr::select(monitor, timestamp, y = !!rlang::sym(pollutant)) %>%
     dplyr::inner_join(fleet, by = "timestamp") %>%
     dplyr::rename(x = fleet_avg)

@@ -217,9 +217,145 @@ print(cal_master$pm1,  n = 65)
 print(cal_master$pm10, n = 65)
 print(cal_master$pm25, n = 65)
 
+test <- cal_master$pm25
+
 # write_csv(cal_master$pm1, here::here("data","calibration", paste0("calibration_pm1.csv")))
 # write_csv(cal_master$pm10, here::here("data","calibration", paste0("calibration_pm10.csv")))
 # write_csv(cal_master$pm25, here::here("data","calibration", paste0("calibration_pm25.csv")))
+
+```
+
+
+
+## fleet average plots 
+
+```{r}
+window2 <- config$colocation_windows %>%
+  purrr::keep(~ .x$name == "window2_new_monitors") %>%
+  .[[1]]
+
+df_w2 <- merged_results$pm25 %>%
+  filter(
+    date >= as.Date(window2$start),
+    date <= as.Date(window2$end)
+  )
+
+new_ids <- get_monitor_ids(window2$monitors)
+
+fleet_w2 <- compute_fleet_avg(
+  df_w2,
+  pollutant = "pm25",
+  min_active = config$thresholds$min_active_monitors,
+  restrict_ids = new_ids
+)
+```
+
+```{r}
+
+reg_stats <- function(df, x, y) {
+  fit <- lm(reformulate(x, y), data = df)
+  
+  tibble(
+    slope = coef(fit)[2],
+    intercept = coef(fit)[1],
+    r2 = summary(fit)$r.squared,
+    rmse = sqrt(mean(residuals(fit)^2))
+  )
+}
+
+
+ref_raw <- df_w2 %>%
+  filter(monitor == "MOD-PM-00884") %>%
+  select(timestamp, pm25_raw = pm25)
+
+plot_raw <- ref_raw %>%
+  inner_join(fleet_w2, by = "timestamp")
+
+stats_raw <- plot_raw %>%
+  reg_stats(x = "fleet_avg", y = "pm25_raw")
+
+plot_raw_sample <- plot_raw %>%
+  slice_sample(n = 5000)
+
+ggplot(plot_raw_sample, aes(x = fleet_avg, y = pm25_raw)) +
+  geom_point(alpha = 0.2, size = 0.8) +
+  geom_smooth(
+    data = plot_raw,
+    method = "lm",
+    se = FALSE,
+    color = "black"
+  ) +
+  annotate(
+    "text",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = sprintf(
+      "Slope = %.3f\nR² = %.3f\nRMSE = %.1f",
+      stats_raw$slope,
+      stats_raw$r2,
+      stats_raw$rmse
+    ),
+    size = 4
+  ) +
+  labs(
+    x = "New fleet average PM2.5",
+    y = "MOD-PM-00884 raw PM2.5",
+    title = "Window 2: Raw MOD-PM-00884 vs New Fleet Average"
+  )
+
+
+```
+
+
+```{r}
+coef_00884 <- cal_master$pm25 %>%
+  filter(
+    monitor == "MOD-PM-00884",
+    window_name == "window1"
+  ) 
+
+ref_corrected <- ref_raw %>%
+  mutate(
+    pm25_corr = (pm25_raw - coef_00884$intercept) / coef_00884$slope
+  )
+
+plot_corr <- ref_corrected %>%
+  inner_join(fleet_w2, by = "timestamp")
+
+stats_corr <- plot_corr %>%
+  reg_stats(x = "fleet_avg", y = "pm25_corr")
+
+
+plot_corr_sample <- plot_corr %>%
+  slice_sample(n = 5000)
+
+
+ggplot(plot_corr_sample, aes(x = fleet_avg, y = pm25_corr)) +
+  geom_point(alpha = 0.2, size = 0.8) +
+  geom_smooth(
+    data = plot_corr,
+    method = "lm",
+    se = FALSE,
+    color = "black"
+  ) +
+  annotate(
+    "text",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = sprintf(
+      "Slope = %.3f\nR² = %.3f\nRMSE = %.1f",
+      stats_corr$slope,
+      stats_corr$r2,
+      stats_corr$rmse
+    ),
+    size = 4
+  ) +
+  labs(
+    x = "New fleet average PM2.5",
+    y = "MOD-PM-00884 corrected PM2.5",
+    title = "Window 2: Corrected MOD-PM-00884 vs New Fleet Average"
+  )
+
 
 ```
 
