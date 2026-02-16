@@ -163,6 +163,10 @@ p_data_clean_matched <- p_data_clean %>%
 combined <- bind_cols(p_data_clean_matched, n_data) %>%
   mutate(datetime = make_datetime(year + 2000, month, day, hour, minute)) %>%
   select(datetime, everything())
+
+# check out cleaned data 
+combined %>%
+  select(datetime, temp_c, rh_percent, pressure_hpa)
 ```
 
 
@@ -273,7 +277,7 @@ pressure_offset = 0.275
 
 
 ## path to GRIMM data folder
-folder <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/FEMs/GRIMM/raw/GRIMM_20250811_20251008"
+folder <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/FEMs/GRIMM/raw/GRIMM_20251008_20251218"
 
 ## Create list of the files in the GRIMM folder 
 files <- list.files(folder, pattern = "\\.TXT$", full.names = TRUE)
@@ -294,7 +298,7 @@ grimm_hourly <- grimm_all %>%
             grimm_pm10 = mean(pm10, na.rm = TRUE))
 
 # save summarize output
-write_csv(grimm_hourly, here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20250811-20251008.csv"))
+write_csv(grimm_hourly, here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20251008-20251218.csv"))
 
 
 # summarize grimm data daily
@@ -310,7 +314,7 @@ grimm_daily <- grimm_hourly  %>%
             grimm_pm10 = mean(grimm_pm10, na.rm = TRUE))
 
 # save summarized output 
-write_csv(grimm_daily, here("data", "FEMs", "GRIMM", "clean", "grimm_daily_20250811-20251008.csv"))
+write_csv(grimm_daily, here("data", "FEMs", "GRIMM", "clean", "grimm_daily_20251008-20251218.csv"))
 
 ```
 

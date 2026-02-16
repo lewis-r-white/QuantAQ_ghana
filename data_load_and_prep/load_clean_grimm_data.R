@@ -127,7 +127,7 @@ load_grimm_file <- function(file_path) {
 }
 
 
-folder <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/FEMs/GRIMM/raw/GRIMM_20250811_20251008"
+folder <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/FEMs/GRIMM/raw/GRIMM_20260123_20260126"
 
 files <- list.files(folder, pattern = "\\.TXT$", full.names = TRUE)
 

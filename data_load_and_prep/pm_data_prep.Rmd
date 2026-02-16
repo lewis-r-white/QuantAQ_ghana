@@ -120,8 +120,13 @@ sd_paths <- c(
   here("data/all_measurements/sd/full_sd_card_2025-03-01_to_2025-09-01.csv")
 )
 
+# if don't have sd data use this
+sd_paths <- character(0) 
+
 
 cloud_path <- here("data/all_measurements/cloud/ghana_AQ_parent_full_20240816_20250901.csv")
+
+
 
 
 data_loaded <- load_and_merge_all_pm(sd_paths, cloud_path, pollutants)
@@ -331,53 +336,22 @@ It returns a list with hourly and daily, each including both per-monitor means a
 # source function that aggregates data by time scale of interest (hourly, daily)
 source(here("src", "summarize_pollution_times.R"))
 
-## Manually specify whether to use corrected data or raw data depending on calibration 
-pm1_clean <- pm1_corrected %>%
-  mutate(
-    pm1_data_summarize = if_else(
-      monitor %in% original_fleet$monitor,
-      pm1,        # corrected values if in original fleet 
-      pm1_raw     # raw values for new fleet. correction equation was leading to a lot of negative readings. 
-    )
-  )
-
-pm10_clean <- pm10_corrected %>%
-  mutate(
-    pm10_data_summarize = if_else(
-      monitor %in% original_fleet$monitor,
-      pm10,        # corrected values if in original fleet 
-      pm10_raw     # raw values for new fleet
-    )
-  )
-
-
-pm25_clean <- pm25_corrected %>%
-  mutate(
-    pm25_data_summarize = if_else(
-      monitor %in% original_fleet$monitor,
-      pm25,        # corrected values if in original fleet 
-      pm25_raw     # raw values for new fleet
-    )
-  )
-
-
 summarized_pm1 <- summarize_pollution_times(
-  pm1_clean, "pm1_data_summarize",
+  pm1_corrected, "pm1",
   min_minutes_per_hour = 45,
   min_hours_per_day   = 18,
   min_active_monitors = 10
 )
 
-
 summarized_pm10 <- summarize_pollution_times(
-  pm10_clean, "pm10_data_summarize",
+  pm10_corrected, "pm10",
   min_minutes_per_hour = 45,
   min_hours_per_day   = 18,
   min_active_monitors = 10
 )
 
 summarized_pm25 <- summarize_pollution_times(
-  pm25_clean, "pm25_data_summarize",
+  pm25_corrected, "pm25",
   min_minutes_per_hour = 45,
   min_hours_per_day   = 18,
   min_active_monitors = 10

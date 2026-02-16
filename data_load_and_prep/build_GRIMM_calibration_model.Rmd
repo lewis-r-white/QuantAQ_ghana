@@ -70,7 +70,7 @@ batch1_pm_00884_hourly <- left_join(modulair_pm_25_hourly, modulair_pm_1_hourly,
 #   filter(!is.na(mean_pm25))
 
 
-batch2_pm_00884_hourly <- read_csv(here("data", "pm", "summarized", "modpm00884_hourly_20250901-20251115.csv")) %>%
+batch2_pm_00884_hourly <- read_csv(here("data", "pm", "summarized", "modpm00884_hourly_20250901-20251231.csv")) %>%
   filter(!is.na(mean_pm25))
 
 modulair_pm_hourly <- bind_rows(batch1_pm_00884_hourly, batch2_pm_00884_hourly) %>%
@@ -93,7 +93,7 @@ modulair_rh_hourly <- read_csv(here("data", "weather", "summarized", "rh_hourly_
 
 batch1_weather_00884_hourly <- left_join(modulair_temp_hourly, modulair_rh_hourly, by = c("monitor", "date", "hour"))
 
-batch2_weather_00884_hourly <- read_csv(here("data", "weather", "summarized", "modpm00884_hourly_20250901-20251115.csv"))
+batch2_weather_00884_hourly <- read_csv(here("data", "weather", "summarized", "modpm00884_hourly_20250901-20251231.csv"))
 
 modulair_weather_hourly <- bind_rows(batch1_weather_00884_hourly, batch2_weather_00884_hourly) %>%
   distinct(date, hour, .keep_all = TRUE) # remove overlapping day of sept 1
@@ -108,22 +108,29 @@ modulair_full <- full_join(modulair_pm_hourly, modulair_weather_hourly, by = c("
          mod_pm1 = mean_pm1,
          mod_pm10 = mean_pm10,
          mod_temp = mean_met_temp,
-         mod_rh = mean_met_rh)
+         mod_rh = mean_met_rh) %>%
+  filter(date < as.Date("2025-12-19"))
 ```
 
 
 ## Load in the GRIMM data 
 
 ```{r}
-grimm_full <- read_csv(here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20250811-20251008.csv")) %>%
+grimm_1 <- read_csv(here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20250811-20251008.csv")) %>%
   mutate(hour = hour(date_hour)) %>%
   select(date_hour, date, hour, everything())
+
+grimm_2 <- read_csv(here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20251008-20251218.csv")) %>%
+  mutate(hour = hour(date_hour)) %>%
+  select(date_hour, date, hour, everything())
+
+grimm_full <- bind_rows(grimm_1, grimm_2)
 ```
 
 
 ```{r}
 # check out distributions
-hist(modulair_full$mod_pm25) 
+hist(modulair_full %>% filter(mod_pm25 < 100) %>% pull(mod_pm25))
 hist(grimm_full$grimm_pm25)
 ```
 
@@ -136,7 +143,8 @@ mod_grimm_full <- inner_join(modulair_full, grimm_full, by = c("date_hour", "dat
   mutate(month = month(date),
          day = day(date),
          season = case_when(month %in% c(12, 1, 2) ~ "Harmattan",
-                            month %in% c(3, 4, 5, 6, 7, 8, 9, 10, 11) ~ "Not Harmattan"))
+                            month %in% c(3, 4, 5, 6, 7, 8, 9, 10, 11) ~ "Not Harmattan")) %>%
+  mutate(season = as.factor(season))
   
 ```
 
@@ -177,10 +185,12 @@ mod_grimm_full %>%
 
 ## Elastic net regression
 
+### Option 1: Random split 
+
 ```{r}
 set.seed(123) # for reproduceability
 
-split <- initial_split(mod_grimm_full, prop = 0.8) 
+split <- initial_split(mod_grimm_full, prop = 0.8, strata = season) 
 train <- training(split)
 test <- testing(split)
 
@@ -193,12 +203,14 @@ cv_folds <- vfold_cv(train, v = 5)
 ```{r}
 calib_recipe <- recipe(
     grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour,
-    data = mod_grimm_full
+    data = train
 ) %>%
   step_mutate(
-    hour = factor(hour)
+    hour_num = as.numeric(hour),
+    sin_hour = sin(2*pi*hour_num/24),
+    cos_hour = cos(2*pi*hour_num/24)
   ) %>%
-  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_rm(hour, hour_num) %>%
   step_impute_bag(all_numeric_predictors()) %>%      
   step_normalize(all_numeric_predictors()) %>%
   step_zv(all_predictors())
@@ -242,6 +254,15 @@ collect_metrics(enet_last)
 enet_preds <- collect_predictions(enet_last)
 
 
+metrics_df <- enet_preds %>%
+  yardstick::metrics(truth = grimm_pm25, estimate = .pred)
+
+rmse_val <- metrics_df %>% filter(.metric == "rmse") %>% pull(.estimate)
+rsq_val  <- metrics_df %>% filter(.metric == "rsq") %>% pull(.estimate)
+
+
+
+
 ggplot(enet_preds, aes(x = grimm_pm25, y = .pred)) +
   geom_point(alpha = 0.5) +
   geom_abline(slope = 1, intercept = 0, color = "red") +
@@ -265,14 +286,276 @@ ggplot(enet_preds, aes(x = grimm_pm25, y = .pred)) +
 
 
 
+# 
+# enet_fit <- fit(final_enet_wf, data = mod_grimm_full)
+# 
+# enet_fit %>% 
+#   extract_fit_parsnip() %>% 
+#   tidy()
+# 
+# saveRDS(enet_fit, here("data", "calibration", "modulair_grimm_enet_model.rds"))
 
-enet_fit <- fit(final_enet_wf, data = mod_grimm_full)
 
-enet_fit %>% 
-  extract_fit_parsnip() %>% 
-  tidy()
+```
 
-saveRDS(enet_fit, here("data", "calibration", "modulair_grimm_enet_model.rds"))
+
+
+## Elastic net regression
+
+### Option 2: Day-blocked validation
+Random sample, but hours from the same day can't be in both the training and test data. This removes a lot of leakage from similar times. 
+
+```{r}
+set.seed(123) # for reproduceability
+
+# split by unique date (keeps whole days together)
+test_dates <- mod_grimm_full %>%
+  distinct(date, season) %>%
+  group_by(season) %>%
+  slice_sample(prop = 0.2) %>%
+  ungroup() %>%
+  pull(date)
+
+
+train <- mod_grimm_full %>% filter(!date %in% test_dates)
+test  <- mod_grimm_full %>% filter(date %in% test_dates)
+
+# CV that respects day grouping
+cv_folds <- group_vfold_cv(train, group = date, v = 5)
+```
+
+
+```{r}
+calib_recipe <- recipe(
+    grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour,
+    data = train
+) %>%
+  step_mutate(
+    hour_num = as.numeric(hour),
+    sin_hour = sin(2*pi*hour_num/24),
+    cos_hour = cos(2*pi*hour_num/24)
+  ) %>%
+  step_rm(hour, hour_num) %>%
+  step_impute_bag(all_numeric_predictors()) %>%      
+  step_normalize(all_numeric_predictors()) %>%
+  step_zv(all_predictors())
+
+
+enet_spec <- linear_reg(
+  penalty = tune(),     # overall shrinkage
+  mixture = tune()      # 0 = ridge, 1 = LASSO, between = elastic net
+) %>%
+  set_engine("glmnet")
+
+
+enet_grid <- grid_regular(
+  penalty(range = c(-4, 0)),   # 10^-4 to 10^0 = 1e-4 to 1.0
+  mixture(range = c(0, 1)),
+  levels = 6
+)
+
+
+enet_wf <- workflow() %>%
+  add_recipe(calib_recipe) %>%
+  add_model(enet_spec)
+
+
+set.seed(123)
+enet_tuned <- tune_grid(
+  enet_wf,
+  resamples = cv_folds,
+  grid = enet_grid,
+  metrics = metric_set(yardstick::rmse, yardstick::rsq, yardstick::mae)
+)
+
+
+best_enet <- select_best(enet_tuned, metric = "rmse")
+final_enet_wf <- finalize_workflow(enet_wf, best_enet)
+
+
+# Fit on train, evaluate on test
+final_fit <- fit(final_enet_wf, data = train)
+
+enet_preds <- predict(final_fit, new_data = test) %>%
+  bind_cols(test %>% select(grimm_pm25))
+
+metrics_df <- enet_preds %>% metrics(truth = grimm_pm25, estimate = .pred)
+metrics_df
+
+rmse_val <- metrics_df %>% filter(.metric == "rmse") %>% pull(.estimate)
+rsq_val  <- metrics_df %>% filter(.metric == "rsq") %>% pull(.estimate)
+
+ggplot(enet_preds, aes(x = grimm_pm25, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste0("RMSE: ", round(rmse_val, 2), 
+                   "\nR²: ", round(rsq_val, 2)),
+    size = 4,
+    label.size = .1
+  ) +
+  coord_equal() +
+  labs(
+    title = "Elastic Net: Observed vs Predicted PM2.5 (Test Set)",
+    x = "Observed PM2.5 (GRIMM)",
+    y = "Predicted PM2.5 (Elastic Net)",
+    subtitle = "Red line shows slope 1"
+  ) +
+  theme_minimal()
+
+
+## Compare test set to baseline comparison 
+baseline_metrics <- test %>%
+  transmute(grimm_pm25, mod_pm25) %>%
+  yardstick::metrics(truth = grimm_pm25, estimate = mod_pm25)
+
+baseline_metrics
+
+
+
+
+# enet_fit <- fit(final_enet_wf, data = mod_grimm_full)
+# 
+# enet_fit %>% 
+#   extract_fit_parsnip() %>% 
+#   tidy()
+# 
+# saveRDS(enet_fit, here("data", "calibration", "modulair_grimm_enet_model.rds"))
+# 
+
+```
+
+
+
+## Elastic net regression
+
+### Option 3: Time based split 
+Because weather events move fairly slowly typically, by including nearby hours in training and test data, it is akin to data leakage in the model. We can get around that by using a continuous chunk of time for the splits. 
+
+```{r}
+set.seed(123) # for reproduceability
+
+library(rsample)
+
+# last 20% of DATES as test
+dates <- mod_grimm_full %>% distinct(date) %>% arrange(date)
+cut  <- floor(0.8 * nrow(dates))
+train_dates <- dates$date[1:cut]
+test_dates  <- dates$date[(cut+1):nrow(dates)]
+
+train <- mod_grimm_full %>% filter(date %in% train_dates)
+test  <- mod_grimm_full %>% filter(date %in% test_dates)
+
+train %>% count(season)
+test  %>% count(season)
+
+
+cv_folds <- group_vfold_cv(train, group = date, v = 5)
+```
+
+
+```{r}
+calib_recipe <- recipe(
+    grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour,
+    data = train
+) %>%
+  step_mutate(
+    hour_num = as.numeric(hour),
+    sin_hour = sin(2*pi*hour_num/24),
+    cos_hour = cos(2*pi*hour_num/24)
+  ) %>%
+  step_rm(hour, hour_num) %>%
+  step_impute_bag(all_numeric_predictors()) %>%      
+  step_normalize(all_numeric_predictors()) %>%
+  step_zv(all_predictors())
+
+
+enet_spec <- linear_reg(
+  penalty = tune(),     # overall shrinkage
+  mixture = tune()      # 0 = ridge, 1 = LASSO, between = elastic net
+) %>%
+  set_engine("glmnet")
+
+
+enet_grid <- grid_regular(
+  penalty(range = c(-4, 0)),   # 10^-4 to 10^0 = 1e-4 to 1.0
+  mixture(range = c(0, 1)),
+  levels = 6
+)
+
+
+enet_wf <- workflow() %>%
+  add_recipe(calib_recipe) %>%
+  add_model(enet_spec)
+
+
+set.seed(123)
+enet_tuned <- tune_grid(
+  enet_wf,
+  resamples = cv_folds,
+  grid = enet_grid,
+  metrics = metric_set(yardstick::rmse, yardstick::rsq, yardstick::mae)
+)
+
+
+best_enet <- select_best(enet_tuned, metric = "rmse")
+final_enet_wf <- finalize_workflow(enet_wf, best_enet)
+
+
+final_fit <- fit(final_enet_wf, data = train)
+
+enet_preds <- predict(final_fit, new_data = test) %>%
+  bind_cols(test %>% select(grimm_pm25))
+
+metrics_df <- metrics(enet_preds, truth = grimm_pm25, estimate = .pred)
+
+metrics_df
+
+rmse_val <- metrics_df %>% filter(.metric == "rmse") %>% pull(.estimate)
+rsq_val  <- metrics_df %>% filter(.metric == "rsq") %>% pull(.estimate)
+
+
+ggplot(enet_preds, aes(x = grimm_pm25, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste0("RMSE: ", round(rmse_val, 2), 
+                   "\nR²: ", round(rsq_val, 2)),
+    size = 4,
+    label.size = .1
+  ) +
+  coord_equal() +
+  labs(
+    title = "Elastic Net: Observed vs Predicted PM2.5 (Test Set)",
+    x = "Observed PM2.5 (GRIMM)",
+    y = "Predicted PM2.5 (Elastic Net)",
+    subtitle = "Red line shows slope 1"
+  ) +
+  theme_minimal()
+
+
+## Compare test set to baseline comparison 
+baseline_metrics <- test %>%
+  transmute(grimm_pm25, mod_pm25) %>%
+  yardstick::metrics(truth = grimm_pm25, estimate = mod_pm25)
+
+baseline_metrics
+
+
+# 
+# enet_fit <- fit(final_enet_wf, data = mod_grimm_full)
+# 
+# enet_fit %>% 
+#   extract_fit_parsnip() %>% 
+#   tidy()
+# 
+# saveRDS(enet_fit, here("data", "calibration", "modulair_grimm_enet_model.rds"))
 
 
 ```
@@ -280,13 +563,18 @@ saveRDS(enet_fit, here("data", "calibration", "modulair_grimm_enet_model.rds"))
 
 
 
-# Set up for ML 
-* NOTE: will definitely want to run this again once there is more data, especially with harmattan season. Include that as predictor as well. 
+
+
+
+
+# XG Boost 
+
+## Option 1:  Random split 
 
 ```{r}
 set.seed(123) # for reproduceability
 
-split <- initial_split(mod_grimm_full, prop = 0.8) 
+split <- initial_split(mod_grimm_full, prop = 0.8, strata = season) 
 train <- training(split)
 test <- testing(split)
 
@@ -297,16 +585,18 @@ cv_folds <- vfold_cv(train, v = 5)
 
 
 ```{r}
-calibration_recipe <- recipe(grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour + season, data = train) %>%
+xgb_recipe <- recipe(grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour + season, data = train) %>%
   step_mutate(
-    hour = as.factor(hour),
-    season = as.factor(season)
+    season   = factor(season),
+    hour_num = as.numeric(hour),
+    sin_hour = sin(2*pi*hour_num/24),
+    cos_hour = cos(2*pi*hour_num/24)
   ) %>%
-  step_novel(all_nominal_predictors()) %>%   # handle unseen levels in future prediction (e.g. harmattan season when trained only non harmattan)
-  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_rm(hour, hour_num) %>%
+  step_novel(season) %>%   # for future prediction if unseen season in new data
+  step_dummy(season, one_hot = TRUE) %>%
   step_impute_bag(all_numeric_predictors()) %>% # fix for missingness. Imputes using bagged decision trees. 
-  step_zv(all_predictors()) %>%  # drop zero-variance (e.g. season when all non-harmattan)
-  step_normalize(all_numeric_predictors())
+  step_zv(all_predictors()) # drop zero-variance (e.g. season when all non-harmattan)
 
 
 xgb_spec <- boost_tree(
@@ -318,7 +608,7 @@ xgb_spec <- boost_tree(
   mtry = tune()
   ) %>%
   set_mode("regression") %>%
-  set_engine("xgboost", early_stopping_rounds = 20)
+  set_engine("xgboost")
 
 
 
@@ -332,7 +622,7 @@ xgb_grid <- grid_max_entropy(
 )
 
 xgb_wf <- workflow() %>%
-  add_recipe(calibration_recipe) %>%
+  add_recipe(xgb_recipe) %>%
   add_model(xgb_spec)
 
 tictoc::tic()
@@ -399,13 +689,621 @@ ggplot(test_results, aes(x = grimm_pm25, y = .pred)) +
 
 
 
+# XG Boost 
+
+## Option 2: Day-blocked validation
+Random sample, but hours from the same day can't be in both the training and test data. This removes a lot of leakage from similar times. 
+
+```{r}
+set.seed(123) # for reproduceability
+
+# split by unique date (keeps whole days together)
+test_dates <- mod_grimm_full %>%
+  distinct(date, season) %>%
+  group_by(season) %>%
+  slice_sample(prop = 0.2) %>%
+  ungroup() %>%
+  pull(date)
+
+
+train <- mod_grimm_full %>% filter(!date %in% test_dates)
+test  <- mod_grimm_full %>% filter(date %in% test_dates)
+
+# CV that respects day grouping
+cv_folds <- group_vfold_cv(train, group = date, v = 5)
+```
+
+
+```{r}
+xgb_recipe <- recipe(grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour + season, data = train) %>%
+  step_mutate(
+    season   = factor(season),
+    hour_num = as.numeric(hour),
+    sin_hour = sin(2*pi*hour_num/24),
+    cos_hour = cos(2*pi*hour_num/24)
+  ) %>%
+  step_rm(hour, hour_num) %>%
+  step_novel(season) %>%   #  for future prediction if unseen season in new data
+  step_dummy(season, one_hot = TRUE) %>%
+  step_impute_bag(all_numeric_predictors()) %>% # fix for missingness. Imputes using bagged decision trees. 
+  step_zv(all_predictors()) # drop zero-variance (e.g. season when all non-harmattan)
+
+
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  learn_rate = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune()
+  ) %>%
+  set_mode("regression") %>%
+  set_engine("xgboost")
+
+
+
+xgb_grid <- grid_max_entropy(
+  tree_depth(),
+  learn_rate(),
+  loss_reduction(),
+  sample_prop(),
+  finalize(mtry(), xgb_recipe %>% prep(training = train) %>% juice()),
+  size = 25
+)
+
+xgb_wf <- workflow() %>%
+  add_recipe(xgb_recipe) %>%
+  add_model(xgb_spec)
+
+tictoc::tic()
+
+registerDoParallel()
+set.seed(123)
+
+xgb_tuned <- tune_grid(
+  xgb_wf,
+  resamples = cv_folds,
+  grid = xgb_grid,
+  metrics = metric_set(yardstick::rmse, yardstick::rsq, yardstick::mae)
+)
+
+tictoc::toc() # around 50 mins
+beepr::beep(sound = 2)
+
+
+best_params <- select_best(xgb_tuned, metric = "rmse")
+
+final_wf <- finalize_workflow(xgb_wf, best_params)
+
+# Fit on TRAIN, evaluate on TEST (custom split => no last_fit)
+final_fit <- fit(final_wf, data = train)
+
+## Evaluate on test set 
+test_results <- predict(final_fit, new_data = test) %>%
+  bind_cols(test %>% select(grimm_pm25))
+
+metrics_df <- yardstick::metrics(test_results, truth = grimm_pm25, estimate = .pred)
+
+metrics_df
+# save metrics
+# pull rmse and rsq from metrics 
+
+rmse_test <- metrics_df %>% filter(.metric == "rmse") %>% pull(.estimate)
+rsq_test  <- metrics_df %>% filter(.metric == "rsq") %>% pull(.estimate)
+
+```
+
+
+```{r}
+# plot results and include rmse and rsq 
+ggplot(test_results, aes(x = grimm_pm25, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  coord_equal()  +
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste0(
+      "RMSE: ", round(rmse_test, 2), "\n",
+      "R²: ", round(rsq_test, 3)
+    ),
+    size = 4,
+    label.size = .1
+  ) +
+  labs(
+    title = "XGBoost: Observed vs Predicted PM2.5 (Test Set)",
+    x = "Observed PM2.5",
+    y = "Predicted PM2.5"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+# XG Boost 
+
+## Option 3: Time based split 
+Because weather events move fairly slowly typically, by including nearby hours in training and test data, it is akin to data leakage in the model. We can get around that by using a continuous chunk of time for the splits. 
+
+Conceptual alternative for future prediction
+
+
+```{r}
+set.seed(123) # for reproduceability
+
+library(rsample)
+
+# last 20% of DATES as test
+dates <- mod_grimm_full %>% distinct(date) %>% arrange(date)
+cut  <- floor(0.8 * nrow(dates))
+train_dates <- dates$date[1:cut]
+test_dates  <- dates$date[(cut+1):nrow(dates)]
+
+train <- mod_grimm_full %>% filter(date %in% train_dates)
+test  <- mod_grimm_full %>% filter(date %in% test_dates)
+
+train %>% count(season)
+test  %>% count(season)
+
+
+cv_folds <- group_vfold_cv(train, group = date, v = 5)
+```
+
+
+```{r}
+xgb_recipe <- recipe(grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh + hour + season, data = train) %>%
+  step_mutate(
+    season   = factor(season),
+    hour_num = as.numeric(hour),
+    sin_hour = sin(2*pi*hour_num/24),
+    cos_hour = cos(2*pi*hour_num/24)
+  ) %>%
+  step_rm(hour, hour_num) %>%
+  step_novel(season) %>%   #  for future prediction if unseen season in new data
+  step_dummy(season, one_hot = TRUE) %>%
+  step_impute_bag(all_numeric_predictors()) %>% # fix for missingness. Imputes using bagged decision trees. 
+  step_zv(all_predictors()) # drop zero-variance (e.g. season when all non-harmattan)
+
+
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  learn_rate = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune()
+  ) %>%
+  set_mode("regression") %>%
+  set_engine("xgboost")
+
+
+
+xgb_grid <- grid_max_entropy(
+  tree_depth(),
+  learn_rate(),
+  loss_reduction(),
+  sample_prop(),
+  finalize(mtry(), xgb_recipe %>% prep(training = train) %>% juice()),
+  size = 25
+)
+
+xgb_wf <- workflow() %>%
+  add_recipe(xgb_recipe) %>%
+  add_model(xgb_spec)
+
+tictoc::tic()
+
+registerDoParallel()
+set.seed(123)
+
+xgb_tuned <- tune_grid(
+  xgb_wf,
+  resamples = cv_folds,
+  grid = xgb_grid,
+  metrics = metric_set(yardstick::rmse, yardstick::rsq, yardstick::mae)
+)
+
+tictoc::toc() # around 50 mins
+beepr::beep(sound = 2)
+
+
+best_params <- select_best(xgb_tuned, metric = "rmse")
+
+final_wf <- finalize_workflow(xgb_wf, best_params)
+
+# Fit on TRAIN, evaluate on TEST (custom split => no last_fit)
+final_fit <- fit(final_wf, data = train)
+
+## Evaluate on test set 
+test_results <- predict(final_fit, new_data = test) %>%
+  bind_cols(test %>% select(grimm_pm25))
+
+metrics_df <- yardstick::metrics(test_results, truth = grimm_pm25, estimate = .pred)
+
+metrics_df
+# save metrics
+# pull rmse and rsq from metrics 
+
+rmse_test <- metrics_df %>% filter(.metric == "rmse") %>% pull(.estimate)
+rsq_test  <- metrics_df %>% filter(.metric == "rsq") %>% pull(.estimate)
+
+```
+
+
+```{r}
+# plot results and include rmse and rsq 
+ggplot(test_results, aes(x = grimm_pm25, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  coord_equal()  +
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste0(
+      "RMSE: ", round(rmse_test, 2), "\n",
+      "R²: ", round(rsq_test, 3)
+    ),
+    size = 4,
+    label.size = .1
+  ) +
+  labs(
+    title = "XGBoost: Observed vs Predicted PM2.5 (Test Set)",
+    x = "Observed PM2.5",
+    y = "Predicted PM2.5"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+# Gaussian Mixture Regression (GMR)
+
+```{r}
+library(mclust)
+library(yardstick)
+
+gmr_data <- mod_grimm_full %>%
+  mutate(
+    hour_int = as.integer(hour),
+    hour_sin = sin(2*pi*hour_int/24),
+    hour_cos = cos(2*pi*hour_int/24),
+    season01 = if_else(season == "Harmattan", 1, 0)
+  ) %>%
+  select(
+    mod_pm25, mod_pm1, mod_pm10,
+    mod_temp, mod_rh,
+    hour_sin, hour_cos,
+    season01,
+    grimm_pm25
+  ) %>%
+  tidyr::drop_na()
+
+X_cols <- c(
+  "mod_pm25","mod_pm1","mod_pm10",
+  "mod_temp","mod_rh","hour_sin","hour_cos","season01"
+)
+y_col <- "grimm_pm25"
+
+```
+
+```{r}
+set.seed(13)
+
+idx <- sample(seq_len(nrow(gmr_data)))
+cut <- floor(0.8 * nrow(gmr_data))
+
+train <- gmr_data[idx[1:cut], ]
+test  <- gmr_data[idx[(cut+1):nrow(gmr_data)], ]
+
+```
+
+
+```{r}
+X_train <- as.matrix(train[, X_cols])
+
+gmm <- Mclust(X_train, G = 1:10)
+
+gmm$G
+gmm$modelName
+
+
+train$component <- predict(gmm, X_train)$classification
+test$component  <- predict(gmm, as.matrix(test[, X_cols]))$classification
+
+
+component_models <- train %>%
+  group_by(component) %>%
+  group_map(~ {
+    lm(
+      grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh,
+      data = .x
+    )
+  })
+
+names(component_models) <- unique(train$component)
+
+
+test$gmr_pred <- NA_real_
+
+for (k in unique(test$component)) {
+  idx_k <- which(test$component == k)
+  test$gmr_pred[idx_k] <- predict(
+    component_models[[as.character(k)]],
+    newdata = test[idx_k, ]
+  )
+}
+
+
+truth <- test$grimm_pm25
+est   <- test$gmr_pred
+
+metrics <- tibble(
+  R2    = rsq_vec(truth, est),
+  MAE   = mae_vec(truth, est),
+  Bias  = mean(est - truth),
+  nMAE  = sum(abs(est - truth)) / sum(truth),
+  MNB   = sum(est - truth) / sum(truth)
+)
+
+metrics
+
+
+
+ggplot(test, aes(mod_pm25, mod_pm25 - grimm_pm25, color = factor(component))) +
+  geom_point(alpha = 0.4) +
+  labs(
+    x = "Modulair PM2.5",
+    y = "Raw Bias (Modulair − GRIMM)",
+    color = "Component"
+  ) +
+  theme_minimal()
+
+ggplot(test, aes(mod_pm25, gmr_pred - grimm_pm25, color = factor(component))) +
+  geom_point(alpha = 0.4) +
+  labs(
+    x = "Modulair PM2.5",
+    y = "Corrected Bias (GMR − GRIMM)",
+    color = "Component"
+  ) +
+  theme_minimal()
+
+```
+
+
+
+
+
+
+# Gaussian Mixture Regression (GMR)
+
+## soft GMR
+
+```{r}
+X_train <- as.matrix(train[, X_cols])
+
+gmm <- Mclust(X_train, G = 1:10)
+
+gmm$G
+gmm$modelName
+
+resp_train <- predict(gmm, X_train, what = "z")$z
+resp_test  <- predict(gmm, as.matrix(test[, X_cols]), what = "z")$z
+
+```
+
+```{r}
+component_models <- train %>%
+  mutate(component = apply(resp_train, 1, which.max)) %>%
+  group_by(component) %>%
+  group_map(~ lm(
+    grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh,
+    data = .x
+  ))
+
+names(component_models) <- seq_along(component_models)
+
+
+# Predict from each component model
+pred_mat <- sapply(seq_along(component_models), function(k) {
+  predict(component_models[[k]], newdata = test)
+})
+
+# Responsibility-weighted prediction
+test$gmr_pred_soft <- rowSums(resp_test * pred_mat)
+
+
+truth <- test$grimm_pm25
+est   <- test$gmr_pred_soft
+
+metrics <- tibble(
+  R2    = rsq_vec(truth, est),
+  MAE   = mae_vec(truth, est),
+  Bias  = mean(est - truth),
+  nMAE  = sum(abs(est - truth)) / sum(truth),
+  MNB   = sum(est - truth) / sum(truth)
+)
+
+metrics
+
+ggplot(test, aes(mod_pm25, mod_pm25 - grimm_pm25,
+                 color = factor(max.col(resp_test)))) +
+  geom_point(alpha = 0.4) +
+  labs(
+    x = "Modulair PM2.5",
+    y = "Raw Bias (Modulair − GRIMM)",
+    color = "Dominant Component"
+  ) +
+  theme_minimal()
+
+ggplot(test, aes(mod_pm25, gmr_pred_soft - grimm_pm25,
+                 color = factor(max.col(resp_test)))) +
+  geom_point(alpha = 0.4) +
+  labs(
+    x = "Modulair PM2.5",
+    y = "Corrected Bias (Soft GMR − GRIMM)",
+    color = "Dominant Component"
+  ) +
+  theme_minimal()
+
+```
+
+## Join clustering
+
+```{r}
+joint_cols <- c(X_cols, y_col)
+
+gmm_joint <- Mclust(as.matrix(train[, joint_cols]), G = 1:10)
+
+resp_test_joint <- predict(
+  gmm_joint,
+  as.matrix(test[, joint_cols]),
+  what = "z"
+)$z
+
+
+
+# Add joint-component labels to BOTH train and test
+train$component_joint <- predict(
+  gmm_joint,
+  as.matrix(train[, joint_cols])
+)$classification
+
+test$component_joint <- predict(
+  gmm_joint,
+  as.matrix(test[, joint_cols])
+)$classification
+
+
+
+train$component_joint <- predict(
+  gmm_joint,
+  as.matrix(train[, joint_cols])
+)$classification
+
+
+component_models_joint <- train %>%
+  group_by(component_joint) %>%
+  group_map(~ lm(
+    grimm_pm25 ~ mod_pm25 + mod_temp + mod_rh,
+    data = .x
+  ))
+
+names(component_models_joint) <- unique(train$component_joint)
+
+pred_mat_joint <- sapply(
+  seq_along(component_models_joint),
+  function(k) predict(component_models_joint[[k]], newdata = test)
+)
+
+test$gmr_pred_joint <- rowSums(resp_test_joint * pred_mat_joint)
+
+
+
+
+# Any missing predictions?
+sum(is.na(test$gmr_pred_joint))
+
+# Distribution check
+summary(test$gmr_pred_joint)
+summary(test$grimm_pm25)
+
+# Quick scatter
+plot(test$grimm_pm25, test$gmr_pred_joint)
+abline(0, 1, col = "red")
+
+
+
+truth <- test$grimm_pm25
+est   <- test$gmr_pred_joint
+
+metrics_joint <- tibble(
+  R2    = rsq_vec(truth, est),
+  RMSE = rmse_vec(truth, est),
+  MAE   = mae_vec(truth, est),
+  Bias  = mean(est - truth),
+  nMAE  = sum(abs(est - truth)) / sum(truth),
+  MNB   = sum(est - truth) / sum(truth)
+)
+
+metrics_joint
+
+
+ggplot(test, aes(x = grimm_pm25, y = gmr_pred_joint)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, color = "red") +
+  coord_equal() +
+  labs(
+    title = "Joint GMR: Observed vs Predicted PM2.5",
+    x = "Observed GRIMM PM2.5",
+    y = "Predicted PM2.5 (Joint GMR)"
+  ) +
+  theme_minimal()
+
+
+
+ggplot(test, aes(
+  x = mod_pm25,
+  y = mod_pm25 - grimm_pm25,
+  color = factor(component_joint)
+)) +
+  geom_point(alpha = 0.4) +
+  labs(
+    x = "Modulair PM2.5",
+    y = "Raw Bias (Modulair − GRIMM)",
+    color = "GMM Component"
+  ) +
+  theme_minimal()
+
+
+ggplot(test, aes(
+  x = mod_pm25,
+  y = gmr_pred_joint - grimm_pm25,
+  color = factor(component_joint)
+)) +
+  geom_point(alpha = 0.4) +
+  labs(
+    x = "Modulair PM2.5",
+    y = "Corrected Bias (Joint GMR − GRIMM)",
+    color = "GMM Component"
+  ) +
+  theme_minimal()
+
+
+ggplot(test, aes(mod_temp, mod_rh, color = factor(component_joint))) +
+  geom_point(alpha = 0.4) +
+  labs(
+    x = "Temperature (°C)",
+    y = "Relative Humidity (%)",
+    color = "Component"
+  ) +
+  theme_minimal()
+
+ggplot(test, aes(mod_pm25, mod_rh, color = factor(component_joint))) +
+  geom_point(alpha = 0.4) +
+  labs(
+    x = "Modulair PM2.5",
+    y = "Relative Humidity (%)",
+    color = "Component"
+  ) +
+  theme_minimal()
+
+```
+
+
+
+
+
 
 # Try with other PMs from modulair included 
 
 ```{r}
 set.seed(123) # for reproduceability
 
-split <- initial_split(mod_grimm_full, prop = 0.8) 
+split <- initial_split(mod_grimm_full, prop = 0.8, strata = season) 
 train <- training(split)
 test <- testing(split)
 
@@ -438,7 +1336,7 @@ xgb_spec <- boost_tree(
   mtry = tune()
   ) %>%
   set_mode("regression") %>%
-  set_engine("xgboost", early_stopping_rounds = 20)
+  set_engine("xgboost")
 
 
 
@@ -526,5 +1424,6 @@ calib_fit <- fit(final_wf, data = mod_grimm_full)
 # Save it to disk
 saveRDS(calib_fit, here("data", "calibration", "modulair_grimm_xgb_calib_workflow.rds"))
 ```
+
 
 

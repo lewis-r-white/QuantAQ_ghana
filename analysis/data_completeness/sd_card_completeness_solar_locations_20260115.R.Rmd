@@ -1,0 +1,388 @@
+---
+title: "SD Card Completeness"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 6
+    toc_float: true
+date: "`r Sys.Date()`"
+---
+
+
+```{r load data, echo = FALSE, warning=FALSE, message=FALSE, include=FALSE}
+library(tidyverse)
+library(here)
+library(knitr)
+library(kableExtra)
+library(lubridate)
+library(viridis)
+library(scales)
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+sd1 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/full_sd_card_2023-04-24_to_2024-09-11.rds")
+sd2 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/full_sd_card_2024-08-20_to_2025-01-29.rds")
+sd3 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/sd/full_sd_card_2025-03-01_to_2025-09-01.rds")
+
+sd_full <- rbind(sd1, sd2, sd3) %>% 
+  select(timestamp_iso, pm25, monitor) %>%
+  filter(timestamp_iso > as.Date("2023-09-10"))
+
+original_fleet <- read_csv("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/original_fleet.csv")
+new_fleet <- read_csv("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/new_fleet.csv")
+
+
+
+```
+
+## Hour of Day Analysis 
+
+### Orignial Fleet
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+fleet_window_original <- sd_full %>%
+  semi_join(original_fleet, by = "monitor") %>%
+  mutate(date_hour = floor_date(timestamp_iso, "hour")) %>%
+  summarise(
+    start = min(date_hour, na.rm = TRUE),
+    end   = max(date_hour, na.rm = TRUE)
+  )
+
+
+sd_hour_orig <- sd_full %>%
+  semi_join(original_fleet, by = "monitor") %>%
+  mutate(
+    date_hour   = floor_date(timestamp_iso, "hour"),
+    pm_measured = as.integer(!is.na(pm25))
+  ) %>%
+  group_by(monitor, date_hour) %>%
+  summarise(minutes_in_hour = sum(pm_measured), .groups = "drop") %>%
+  group_by(monitor) %>%
+  complete(
+    date_hour = seq(fleet_window_original$start, fleet_window_original$end, by = "hour"),
+    fill = list(minutes_in_hour = 0)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    hour = hour(date_hour),
+    hour_complete = minutes_in_hour >= 45
+  )
+
+
+hod_orig <- sd_hour_orig %>%
+  group_by(monitor, hour) %>%
+  summarise(
+    percent_complete = mean(hour_complete),
+    .groups = "drop"
+  )
+
+ggplot(hod_orig, aes(x = hour, y = monitor, fill = percent_complete)) +
+  geom_tile() +
+  scale_x_continuous(breaks = 0:23) +
+  scale_fill_viridis_c(
+    option = "magma",
+    limits = c(0, .80),
+    oob = squish,
+    labels = percent_format(accuracy = 1)
+  ) +
+  labs(
+    title = "SD card completeness by hour of day (Original fleet)",
+    subtitle = "Hour considered complete if ≥45 minutes of PM2.5 data",
+    x = "Hour of day",
+    y = "Monitor",
+    fill = "Completeness"
+  ) +
+  theme_minimal(base_size = 12)
+
+
+hod_fleet <- hod_orig %>%
+  group_by(hour) %>%
+  summarise(
+    fleet_complete = mean(percent_complete),
+    .groups = "drop"
+  )
+
+ggplot(hod_fleet, aes(x = hour, y = fleet_complete)) +
+  geom_line(size = 1.2) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_x_continuous(breaks = 0:23) +
+  labs(
+    title = "Fleet-average SD card completeness by hour of day (Original Fleet)",
+    x = "Hour of day",
+    y = "Completeness"
+  ) +
+  theme_minimal()
+```
+
+Across the original fleet, SD card completeness shows a consistent dip during midday to
+afternoon hours, rather than primarily overnight. This pattern suggests power or thermal stress
+during peak daytime conditions.
+
+### New Fleet
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+fleet_window_new <- sd_full %>%
+  semi_join(new_fleet, by = "monitor") %>%
+  mutate(date_hour = floor_date(timestamp_iso, "hour")) %>%
+  summarise(
+    start = min(date_hour, na.rm = TRUE),
+    end   = max(date_hour, na.rm = TRUE)
+  )
+
+
+
+sd_hour_new <- sd_full %>%
+  semi_join(new_fleet, by = "monitor") %>%
+  mutate(
+    date_hour   = floor_date(timestamp_iso, "hour"),
+    pm_measured = as.integer(!is.na(pm25))
+  ) %>%
+  group_by(monitor, date_hour) %>%
+  summarise(minutes_in_hour = sum(pm_measured), .groups = "drop") %>%
+  group_by(monitor) %>%
+  complete(
+    date_hour = seq(fleet_window_new$start, fleet_window_new$end, by = "hour"),
+    fill = list(minutes_in_hour = 0)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    hour = hour(date_hour),
+    hour_complete = minutes_in_hour >= 45
+  )
+
+
+hod_new <- sd_hour_new %>%
+  group_by(monitor, hour) %>%
+  summarise(
+    percent_complete = mean(hour_complete),
+    .groups = "drop"
+  )
+
+ggplot(hod_new, aes(x = hour, y = monitor, fill = percent_complete)) +
+  geom_tile() +
+  scale_x_continuous(breaks = 0:23) +
+  scale_fill_viridis_c(
+    option = "magma",
+    limits = c(0, .85),
+    oob = squish,
+    labels = percent_format(accuracy = 1)
+  ) +
+  labs(
+    title = "SD card completeness by hour of day (New fleet)",
+    subtitle = "Hour considered complete if ≥45 minutes of PM2.5 data",
+    x = "Hour of day",
+    y = "Monitor",
+    fill = "Completeness"
+  ) +
+  theme_minimal(base_size = 12)
+
+
+hod_fleet <- hod_new %>%
+  group_by(hour) %>%
+  summarise(
+    fleet_complete = mean(percent_complete),
+    .groups = "drop"
+  )
+
+ggplot(hod_fleet, aes(x = hour, y = fleet_complete)) +
+  geom_line(size = 1.2) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_x_continuous(breaks = 0:23) +
+  labs(
+    title = "Fleet-average SD card completeness by hour of day (New Fleet)",
+    x = "Hour of day",
+    y = "Completeness"
+  ) +
+  theme_minimal()
+```
+
+The new fleet shows similar but more severe hour-of-day structure.
+
+## weekly time series
+
+### original fleet 
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+sd_day_orig <- sd_hour_orig %>%
+  mutate(date = as.Date(date_hour)) %>%
+  group_by(monitor, date) %>%
+  summarise(
+    hours_complete = sum(hour_complete),
+    day_complete   = hours_complete >= 18,
+    .groups = "drop"
+  )
+
+sd_week_orig <- sd_day_orig %>%
+  mutate(week = floor_date(date, "week")) %>%
+  group_by(monitor, week) %>%
+  summarise(
+    days_complete = sum(day_complete),
+    .groups = "drop"
+  )
+
+monitor_order <- sd_week_orig %>%
+  group_by(monitor) %>%
+  summarise(
+    zero_weeks = sum(days_complete == 0),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(zero_weeks)) %>%
+  pull(monitor)
+
+sd_week_orig_sorted <- sd_week_orig %>%
+  mutate(monitor = factor(monitor, levels = monitor_order)) %>%
+  mutate(
+    days_complete_f = factor(
+      days_complete,
+      levels = 0:7,
+      labels = c(
+        "0 days",
+        "1 day", "2 days", "3 days",
+        "4 days", "5 days", "6 days", "7 days"
+      )
+    )
+  )
+
+
+harmattan_lines <- as.Date(c(
+  "2023-12-01",
+  "2024-02-29",
+  "2024-12-01",
+  "2025-02-28"
+))
+
+ggplot(sd_week_orig_sorted, aes(x = week, y = monitor, fill = days_complete_f)) +
+
+  geom_tile() +
+
+  ## Harmattan vertical lines ON TOP
+  geom_vline(
+    xintercept = harmattan_lines,
+    color = "#fdd835",
+    linewidth = 0.8,
+    alpha = 0.9
+  ) +
+
+  scale_fill_manual(
+    values = c(
+      "0 days" = "#d73027",
+      "1 day"  = "#deebf7",
+      "2 days" = "#c6dbef",
+      "3 days" = "#9ecae1",
+      "4 days" = "#6baed6",
+      "5 days" = "#4292c6",
+      "6 days" = "#2171b5",
+      "7 days" = "#0d3a82"
+    ),
+    drop = FALSE
+  ) +
+
+  labs(
+    title = "SD card availability by week (Original fleet)",
+    subtitle = "Red = no complete days; yellow lines indicate Harmattan start/end (Dec–Feb)",
+    x = "Week",
+    y = "Monitor",
+    fill = "Days complete"
+  ) +
+
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+Weekly completeness highlights several monitors with sustained multi-week outages (weeks with
+zero complete days). Visually, there might be weak associations between season and SD completeness, with Harmattan showing less reliability. 
+
+
+### new fleet 
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+sd_day_new <- sd_hour_new %>%
+  mutate(date = as.Date(date_hour)) %>%
+  group_by(monitor, date) %>%
+  summarise(
+    hours_complete = sum(hour_complete),
+    day_complete   = hours_complete >= 18,
+    .groups = "drop"
+  )
+
+sd_week_new <- sd_day_new %>%
+  mutate(week = floor_date(date, "week")) %>%
+  group_by(monitor, week) %>%
+  summarise(
+    days_complete = sum(day_complete),
+    .groups = "drop"
+  )
+
+monitor_order <- sd_week_new %>%
+  group_by(monitor) %>%
+  summarise(
+    zero_weeks = sum(days_complete == 0),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(zero_weeks)) %>%
+  pull(monitor)
+
+sd_week_new_sorted <- sd_week_new %>%
+  mutate(monitor = factor(monitor, levels = monitor_order)) %>%
+  mutate(
+    days_complete_f = factor(
+      days_complete,
+      levels = 0:7,
+      labels = c(
+        "0 days",
+        "1 day", "2 days", "3 days",
+        "4 days", "5 days", "6 days", "7 days"
+      )
+    )
+  )
+
+
+harmattan_lines <- as.Date(c(
+  "2024-12-01",
+  "2025-02-28"
+))
+
+ggplot(sd_week_new_sorted, aes(x = week, y = monitor, fill = days_complete_f)) +
+
+  geom_tile() +
+
+  ## Harmattan vertical lines ON TOP
+  geom_vline(
+    xintercept = harmattan_lines,
+    color = "#fdd835",
+    linewidth = 0.8,
+    alpha = 0.9
+  ) +
+
+  scale_fill_manual(
+    values = c(
+      "0 days" = "#d73027",
+      "1 day"  = "#deebf7",
+      "2 days" = "#c6dbef",
+      "3 days" = "#9ecae1",
+      "4 days" = "#6baed6",
+      "5 days" = "#4292c6",
+      "6 days" = "#2171b5",
+      "7 days" = "#0d3a82"
+    ),
+    drop = FALSE
+  ) +
+
+  labs(
+    title = "SD card availability by week (Original fleet)",
+    subtitle = "Red = no complete days; yellow lines indicate Harmattan start/end",
+    x = "Week",
+    y = "Monitor",
+    fill = "Days complete"
+  ) +
+
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+Weekly completeness highlights several monitors with sustained multi-week outages (weeks with
+zero complete days).

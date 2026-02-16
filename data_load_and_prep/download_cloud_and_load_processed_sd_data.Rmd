@@ -49,12 +49,24 @@ ghana_devices <- c("MOD-00077", "MOD-00397", "MOD-00398", "MOD-00399", "MOD-0040
                    "MOD-PM-01093")
 
 
+ghana_devices <- c("MOD-PM-00876" , "MOD-PM-00877", "MOD-PM-00885", "MOD-PM-00887", "MOD-PM-00891",
+                   "MOD-PM-00892", "MOD-PM-00893", "MOD-PM-00894", "MOD-PM-00899")
+
+
+ghana_devices <- c("MOD-PM-00871" , "MOD-PM-01072","MOD-PM-01073","MOD-PM-01074","MOD-PM-01075",
+                   "MOD-PM-01076","MOD-PM-01077","MOD-PM-01078","MOD-PM-01079","MOD-PM-01082",
+                   "MOD-PM-01083" ,"MOD-PM-01084","MOD-PM-01085","MOD-PM-01086","MOD-PM-01087",
+                   "MOD-PM-01088","MOD-PM-01089","MOD-PM-01090","MOD-PM-01092","MOD-PM-01093")
+
+
+ghana_devices <- c("MOD-PM-00884")
+
 # specify time zone 
 Sys.setenv(TZ = 'Africa/Accra') # GMT for Ghana
 
 # Define start_date and end_date
 start_date <- as.Date("2025-09-01")  # Due to timezones, start_date needs to be 1 day before the actual start date of interest
-end_date <- as.Date("2025-11-15")
+end_date <- as.Date("2025-12-31")
 country = "Ghana"
 device_list <- ghana_devices # rename list of serial numbers to broad name for function
 
@@ -143,9 +155,10 @@ cat("Data processing for all devices completed.\n")
 # Combine data for all devices into a single data frame
 final_result_df <- bind_rows(result_combined)
 
-saveRDS(final_result_df, file = "processed_monitor_data_20240816_20240930.rds")
 
-write_csv(final_result_df, "ghana_AQ_parent_full_20240816_20240930.csv")
+# saveRDS(final_result_df, file = "processed_monitor_data_20240816_20240930.rds")
+# 
+# write_csv(final_result_df, "ghana_AQ_parent_full_20240816_20240930.csv")
 ```
 
 ```{r}
@@ -232,6 +245,7 @@ full_sd_card = bind_rows(MOD_sd_card, MOD_PM_sd_card) %>%
 # write_csv(full_sd_card, here("data", "all_measurements", "sd", "full_sd_card_2025-03-01_to_2025-09-01.csv")) 
 
 ```
+
 
 
 

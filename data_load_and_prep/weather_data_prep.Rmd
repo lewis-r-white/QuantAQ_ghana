@@ -126,6 +126,11 @@ temp_rh_sd_card <- bind_rows(
   map_dfr(mod_pm_files, read_mod_temp_rh)
 )
 
+# use this if no sd card data
+temp_rh_sd_card <- tibble::tibble()  # empty tibble
+
+
+
 # Save if needed
 # write_rds(temp_rh_sd_card, here("data", "weather", "sd", "temp_rh_sd_card_20240820-20250530.rds"))
 # temp_rh_sd_card <- read_rds(here("data", "weather", "sd",  "temp_rh_sd_card_20240820-20250530.rds"))
@@ -136,6 +141,8 @@ temp_rh_sd_card <- bind_rows(
 
 measurements <- c("met_temp", "met_rh")
 cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20240816_20250901.csv"
+
+cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/MOD_PM_00884_20250901_20251231.csv"
 
 raw_data <- map(measurements, ~ load_pollution_datasets(.x, file_path = cloud_file, file_type = "csv"))
 names(raw_data) <- measurements
@@ -223,6 +230,7 @@ met_rh_summary <- summarize_pollution_times(met_rh_merged, "met_rh")
 
 rh_hourly <- met_rh_summary$hourly
 rh_daily <- met_rh_summary$daily
+
 
 
 # save the summarized outputs 
@@ -361,7 +369,6 @@ temp_rh_full <- full_join(met_temp_merged_unique, met_rh_merged_unique, by = c("
 
 # save output 
 write_rds(temp_rh_full, here("data", "weather", "merged", "temp_rh_full_20240816-20250901.rds"))
-
 
 
 # create full wind data 
