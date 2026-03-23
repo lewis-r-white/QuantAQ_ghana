@@ -26,7 +26,7 @@ In this workflow, we:
 
 The current colocation windows can be found in calibration.yml 
 - Window 1 (original fleet): fit each monitor to the fleet average during its colocation window. 
-- Window 2 (new fleet): fit each new monitor against an already-calibrated reference monitor from the original fleet (e.g., MOD-PM-00884).
+- Window 2 (new fleet): fit each monitor to the fleet average during its colocation window. 
 
 ### Prerequisites and expected folders
 
@@ -51,7 +51,7 @@ colocation_windows:
     start: "2024-12-16"
     end:   "2025-01-25"
     monitors: "new_fleet"
-    reference_monitor: "MOD-PM-00884"
+    reference_monitor: null
 
 ### Load packages, source functions, and load YAML
 
@@ -124,10 +124,7 @@ sd_paths <- c(
 sd_paths <- character(0) 
 
 
-cloud_path <- here("data/all_measurements/cloud/ghana_AQ_parent_full_20240816_20250901.csv")
-
-
-
+cloud_path <- here("data/all_measurements/cloud/ghana_AQ_parent_full_20250831_20260315.csv")
 
 data_loaded <- load_and_merge_all_pm(sd_paths, cloud_path, pollutants)
 
@@ -243,13 +240,18 @@ The new colocation consistently shows slopes around 0.8 and intercepts between 6
 My hypothesis is that the reference monitor used for the second colocation (MOD-PM-00884) had the lowest slope (0.82) from the initial colocation fleet-average regression, suggesting it was somewhat less sensitive than the fleet average. When corrected, its PM readings are scaled up by roughly 20%, which may bias its behavior as a reference—especially after a year in the field and under different seasonal conditions (e.g., Harmattan). The second colocation also took place during Harmattan (higher concentrations and more variability), so the regression may not capture low-end behavior as well. Since the new colocations relied on this single reference rather than a fleet average, any bias in the reference is likely transferred to the new monitors. There may also be some inherent sensitivity differences between the older and newer monitors.
 
 ```{r}
+source(here("src/calibration_helpers.R"))
+source(here("src/calibration_methods.R"))
+source(here("src/build_calibration.R"))
+source(here("src/load_baseline_calibration.R"))
+
 # source in functions to apply the calibration equations if they exist 
 source(here::here("src", "apply_calibration.R"))
 
 # load in calibration tables 
-cal_pm1  <- readr::read_csv(here::here("data","calibration","calibration_pm1.csv"),  show_col_types = FALSE)
-cal_pm25 <- readr::read_csv(here::here("data","calibration","calibration_pm25.csv"), show_col_types = FALSE)
-cal_pm10 <- readr::read_csv(here::here("data","calibration","calibration_pm10.csv"), show_col_types = FALSE)
+cal_pm1  <- readr::read_csv(here::here("data","calibration","calibration_pm1_20251216.csv"),  show_col_types = FALSE)
+cal_pm25 <- readr::read_csv(here::here("data","calibration","calibration_pm25_20251216.csv"), show_col_types = FALSE)
+cal_pm10 <- readr::read_csv(here::here("data","calibration","calibration_pm10_20251216.csv"), show_col_types = FALSE)
 
 # pick most recent calibration for each monitor/variable
 coef_pm1  <- pick_most_recent(cal_pm1,  "pm1")
@@ -320,7 +322,7 @@ corrected_full <- list(pm25_keep, pm1_keep, pm10_keep) %>%
   relocate(monitor, timestamp, date, hour)
 
 
-# write_rds(corrected_full, here("data", "pm", "final", "corrected_full_data_20240816-20240901.rds"))
+# write_rds(corrected_full, here("data", "pm", "final", "corrected_full_data_20250831-20260315.rds"))
 ```
 
 ### summarize the data based on corrected values
@@ -358,52 +360,52 @@ summarized_pm25 <- summarize_pollution_times(
 )
 
 
-pm1_community_hourly <- summarized_pm1$hourly %>% 
-  rename(mean_pm1 = mean_pm1_data_summarize,
-         fleet_average_pm1 = fleet_average_pm1_data_summarize)
+pm1_community_hourly <- summarized_pm1$hourly #%>% 
+#  rename(mean_pm1 = mean_pm1_data_summarize,
+#         fleet_average_pm1 = fleet_average_pm1_data_summarize)
 
-pm1_community_daily <- summarized_pm1$daily %>% 
-  rename(mean_pm1 = mean_pm1_data_summarize,
-         fleet_average_pm1 = fleet_average_pm1_data_summarize)
+pm1_community_daily <- summarized_pm1$daily #%>% 
+ # rename(mean_pm1 = mean_pm1_data_summarize,
+ #        fleet_average_pm1 = fleet_average_pm1_data_summarize)
 
-pm25_community_hourly <- summarized_pm25$hourly %>% 
-  rename(mean_pm25 = mean_pm25_data_summarize,
-         fleet_average_pm25 = fleet_average_pm25_data_summarize)
+pm25_community_hourly <- summarized_pm25$hourly #%>% 
+ # rename(mean_pm25 = mean_pm25_data_summarize,
+ #        fleet_average_pm25 = fleet_average_pm25_data_summarize)
 
-pm25_community_daily <- summarized_pm25$daily %>% 
-  rename(mean_pm25 = mean_pm25_data_summarize,
-         fleet_average_pm25 = fleet_average_pm25_data_summarize)
+pm25_community_daily <- summarized_pm25$daily #%>% 
+  #rename(mean_pm25 = mean_pm25_data_summarize,
+  #       fleet_average_pm25 = fleet_average_pm25_data_summarize)
 
-pm10_community_hourly <- summarized_pm10$hourly %>% 
-  rename(mean_pm10 = mean_pm10_data_summarize,
-         fleet_average_pm10 = fleet_average_pm10_data_summarize)
+pm10_community_hourly <- summarized_pm10$hourly #%>% 
+ # rename(mean_pm10 = mean_pm10_data_summarize,
+  #       fleet_average_pm10 = fleet_average_pm10_data_summarize)
 
-pm10_community_daily <- summarized_pm10$daily %>%
-  rename(mean_pm10 = mean_pm10_data_summarize,
-         fleet_average_pm10 = fleet_average_pm10_data_summarize)
+pm10_community_daily <- summarized_pm10$daily #%>%
+  #rename(mean_pm10 = mean_pm10_data_summarize,
+      #   fleet_average_pm10 = fleet_average_pm10_data_summarize)
 ```
 
 ### Save the summarized output for analysis
 
 ```{r}
 # Save as CSV
-# write_csv(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.csv"))
-# write_csv(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.csv"))
-# write_csv(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.csv"))
-# 
-# write_csv(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20250901.csv"))
-# write_csv(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20250901.csv"))
-# write_csv(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20250901.csv"))
-# 
-# 
+write_csv(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20250831-20260315.csv"))
+write_csv(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20250831-20260315.csv"))
+write_csv(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20250831-20260315.csv"))
+
+write_csv(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20250831-20260315.csv"))
+write_csv(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20250831-20260315.csv"))
+write_csv(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20250831-20260315.csv"))
+
+#
 # # Save as RDS
-# write_rds(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.rds"))
-# write_rds(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.rds"))
-# write_rds(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.rds"))
-# 
-# write_rds(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20250901.rds"))
-# write_rds(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20250901.rds"))
-# write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20250901.rds"))
+write_rds(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20250831-20260315.rds"))
+write_rds(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20250831-20260315.rds"))
+write_rds(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20250831-20260315.rds"))
+
+write_rds(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20250831-20260315.rds"))
+write_rds(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20250831-20260315.rds"))
+write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20250831-20260315.rds"))
 
 ```
 
@@ -533,7 +535,7 @@ pm25_community_hourly <- summarized_pm25$hourly %>%
 mod_pm_00884_summary = left_join(pm1_community_hourly, pm10_community_hourly) %>%
   left_join(pm25_community_hourly)
 
-write_csv(mod_pm_00884_summary, here("data", "pm", "summarized", "modpm00884_raw_hourly_20250801-20250901.csv"))
+# write_csv(mod_pm_00884_summary, here("data", "pm", "summarized", "modpm00884_raw_hourly_20250801-20250901.csv"))
 
 
 ```

@@ -8,6 +8,9 @@ output:
 date: "`r Sys.Date()`"
 ---
 
+
+This report applies the saved GRIMM calibration models to the broader Modulair hourly data set and summarizes how the calibrated predictions behave. The goals are to compare raw and calibrated values, flag observations that fall outside the training domain, and inspect whether the size of the correction varies by monitor or environmental conditions.
+
 ```{r load libraries, include=FALSE}
 # load libraries 
 library(tidyverse)
@@ -17,39 +20,101 @@ library(here)
 library(viridis)
 library(tidymodels)
 library(yardstick) 
+library(DT)
 ```
 
-## Load and prepare Modulair Data 
-```{r}
+### Reconstruct calibration training data
+
+This section rebuilds the co-located Modulair-GRIMM training data used to fit the calibration models. These data are used here only to define the range of predictor values seen during training.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+## PM DATA ----
 modulair_pm_25_hourly <- read_csv(here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.csv")) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
   filter(!is.na(mean_pm25)) %>%
   select(-c(n_minute_obs, n_active, fleet_average_pm25))
 
 modulair_pm_1_hourly <- read_csv(here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.csv")) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
   filter(!is.na(mean_pm1)) %>%
   select(-c(n_minute_obs, n_active, fleet_average_pm1))
 
 modulair_pm_10_hourly <- read_csv(here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.csv")) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
   filter(!is.na(mean_pm10)) %>%
   select(-c(n_minute_obs, n_active, fleet_average_pm10))
 
+batch1_pm_00884_hourly <- left_join(modulair_pm_25_hourly, modulair_pm_1_hourly, by = c("monitor", "date", "hour")) %>%
+  left_join(modulair_pm_10_hourly, by = c("monitor", "date", "hour"))
+
+batch2_pm_00884_hourly <- read_csv(here("data", "pm", "summarized", "modpm00884_hourly_20250901-20251231.csv")) %>%
+  filter(!is.na(mean_pm25))
+
+monitor_start_dates <- tibble::tibble(
+  monitor = c("MOD-PM-00884", "MOD-00077", "MOD-00397", "MOD-PM-00879", "MOD-PM-00893"),
+  start_date = as.Date(c("2025-08-10", "2025-12-15", "2026-01-20", "2026-02-13", "2026-02-13"))
+)
+
+batch3_modulair_pm_25_hourly <- read_csv(here("data", "pm", "summarized", "pm25_grimm_colocated_hourly_20251215-20260301.csv")) %>%
+  filter(!is.na(mean_pm25)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm25)) %>%
+  left_join(monitor_start_dates, by = "monitor") %>%
+  filter(date >= start_date | is.na(start_date)) %>%
+  select(-start_date)
+
+batch3_modulair_pm_1_hourly <- read_csv(here("data", "pm", "summarized", "pm1_grimm_colocated_hourly_20251215-20260301.csv")) %>%
+  filter(!is.na(mean_pm1)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm1)) %>% 
+  left_join(monitor_start_dates, by = "monitor") %>%
+  filter(date >= start_date | is.na(start_date)) %>%
+  select(-start_date)
+
+batch3_modulair_pm_10_hourly <- read_csv(here("data", "pm", "summarized", "pm10_grimm_colocated_hourly_20251215-20260301.csv")) %>%
+  filter(!is.na(mean_pm10)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm10)) %>% 
+  left_join(monitor_start_dates, by = "monitor") %>%
+  filter(date >= start_date | is.na(start_date)) %>%
+  select(-start_date)
+
+batch3_hourly <- left_join(batch3_modulair_pm_25_hourly, batch3_modulair_pm_1_hourly, by = c("monitor", "date", "hour")) %>%
+  left_join(batch3_modulair_pm_10_hourly, by = c("monitor", "date", "hour"))
+
+modulair_pm_hourly <- bind_rows(batch1_pm_00884_hourly, batch2_pm_00884_hourly, batch3_hourly) %>%
+  distinct(date, hour, monitor, .keep_all = TRUE) # remove overlapping day of sept 1
+
+## WEATHER DATA -----
+
 modulair_temp_hourly <- read_csv(here("data", "weather", "summarized", "temp_hourly_20240816-20250901.csv")) %>%
-  filter(!is.na(mean_met_temp)) %>%
-  select(-c(n_minute_obs, n_active, fleet_average_met_temp))
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
+  filter(!is.na(mean_met_temp))%>%
+  select(-c(n_minute_obs, n_active, fleet_average_met_temp)) 
 
 modulair_rh_hourly <- read_csv(here("data", "weather", "summarized", "rh_hourly_20240816-20250901.csv")) %>%
-  filter(!is.na(mean_met_rh)) %>%
+  filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
+  filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
+  filter(!is.na(mean_met_rh))%>%
   select(-c(n_minute_obs, n_active, fleet_average_met_rh))
-```
 
-## Join individual variables to full data and format data to match calibration model expectations 
+batch1_weather_00884_hourly <- left_join(modulair_temp_hourly, modulair_rh_hourly, by = c("monitor", "date", "hour"))
 
-```{r}
-modulair_full <- full_join(modulair_pm_25_hourly, modulair_pm_1_hourly, by = c("monitor", "date", "hour")) %>%
-  full_join(modulair_pm_10_hourly, by = c("monitor", "date", "hour")) %>%
-  full_join(modulair_temp_hourly, by = c("monitor", "date", "hour")) %>%
-  full_join(modulair_rh_hourly, by = c("monitor", "date", "hour")) %>%
-  
+batch2_weather_00884_hourly <- read_csv(here("data", "weather", "summarized", "modpm00884_hourly_20250901-20251231.csv"))
+
+batch3_weather_hourly <- read_csv(here("data", "weather", "summarized", "grimm_weather_hourly_20251215-20260301.csv")) %>% 
+  left_join(monitor_start_dates, by = "monitor") %>%
+  filter(date >= start_date | is.na(start_date)) %>%
+  select(-start_date)
+
+modulair_weather_hourly <- bind_rows(batch1_weather_00884_hourly, batch2_weather_00884_hourly, batch3_weather_hourly) %>%
+  distinct(date, hour, monitor, .keep_all = TRUE) %>% # remove overlapping day of sept 1
+  filter(!is.na(mean_met_temp) & !is.na(mean_met_rh))
+
+## FULL DATA (PM AND WEATHER) ----
+
+modulair_full <- full_join(modulair_pm_hourly, modulair_weather_hourly, by = c("monitor", "date", "hour")) %>%
   mutate(
     date_hour = as.POSIXct(paste(date, hour), format = "%Y-%m-%d %H", tz = "UTC") # create date hour column for GRIMM modeling
   ) %>%
@@ -59,47 +124,378 @@ modulair_full <- full_join(modulair_pm_25_hourly, modulair_pm_1_hourly, by = c("
          mod_pm10 = mean_pm10,
          mod_temp = mean_met_temp,
          mod_rh = mean_met_rh) %>%
+  filter(date < as.Date("2026-03-02"))
+
+##### Load in the GRIMM data 
+
+grimm_1 <- read_csv(here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20250811-20251008.csv")) %>%
+  mutate(hour = hour(date_hour)) %>%
+  select(date_hour, date, hour, everything())
+
+grimm_2 <- read_csv(here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20251008-20251218.csv")) %>%
+  mutate(hour = hour(date_hour)) %>%
+  select(date_hour, date, hour, everything())
+
+grimm_3 <- read_csv(here("data", "FEMs", "GRIMM", "clean", "grimm_hourly_20260123_20260206.csv")) %>%
+  mutate(hour = hour(date_hour)) %>%
+  select(date_hour, date, hour, everything())
+
+grimm_full <- bind_rows(grimm_1, grimm_2, grimm_3)
+
+##### Merge modular and GRIMM data 
+
+# merge and add in seasonality for harmattan
+mod_grimm_full <- inner_join(modulair_full, grimm_full, by = c("date_hour", "date", "hour")) %>%
   mutate(month = month(date),
          day = day(date),
          season = case_when(month %in% c(12, 1, 2) ~ "Harmattan",
-                            month %in% c(3, 4, 5, 6, 7, 8, 9, 10, 11) ~ "Not Harmattan"))
+                            month %in% c(3, 4, 5, 6, 7, 8, 9, 10, 11) ~ "Not Harmattan")) %>%
+  mutate(season = as.factor(season))
+  
 ```
 
-## load the model
+## Load and prepare Modulair Data 
 
-```{r}
-calib_model <- read_rds(here("data", "calibration", "modulair_grimm_xgb_calib_workflow.rds"))
+Load the broader Modulair data set to which the saved calibration models will be applied.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+modulair_pm_25_hourly_1 <- read_csv(here("data", "pm", "summarized", "pm25_community_hourly_20231024-20240816.csv")) %>%
+  filter(!is.na(mean_pm25)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm25))
+
+modulair_pm_25_hourly_2 <- read_csv(here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.csv")) %>%
+  filter(!is.na(mean_pm25)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_pm25))
+
+modulair_pm_25_hourly <- bind_rows(modulair_pm_25_hourly_1, modulair_pm_25_hourly_2)
+
+modulair_temp_hourly_1 <- read_csv(here("data", "weather", "summarized", "temp_hourly_20230815-20240820.csv")) %>%
+  filter(!is.na(mean_met_temp)) %>%
+  select(-c(n_minute_obs, fleet_average_met_temp))
+
+modulair_temp_hourly_2 <- read_csv(here("data", "weather", "summarized", "temp_hourly_20240816-20250901.csv")) %>%
+  filter(!is.na(mean_met_temp)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_met_temp))
+
+modulair_temp_hourly <- bind_rows(modulair_temp_hourly_1, modulair_temp_hourly_2)
+
+
+modulair_rh_hourly_1 <- read_csv(here("data", "weather", "summarized", "rh_hourly_20230815-20240820.csv")) %>%
+  filter(!is.na(mean_met_rh)) %>%
+  select(-c(n_minute_obs, fleet_average_met_rh))
+
+modulair_rh_hourly_2 <- read_csv(here("data", "weather", "summarized", "rh_hourly_20240816-20250901.csv")) %>%
+  filter(!is.na(mean_met_rh)) %>%
+  select(-c(n_minute_obs, n_active, fleet_average_met_rh))
+
+modulair_rh_hourly <- bind_rows(modulair_rh_hourly_1, modulair_rh_hourly_2)
+```
+
+## Join individual variables to full data and format data to match calibration model expectations 
+
+Combines PM2.5, temperature, and relative humidity into one hourly data set.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+modulair_full <- full_join(modulair_pm_25_hourly, modulair_temp_hourly, by = c("monitor", "date", "hour")) %>%
+  full_join(modulair_rh_hourly, by = c("monitor", "date", "hour")) %>%
+  mutate(
+    date_hour = as.POSIXct(paste(date, hour), format = "%Y-%m-%d %H", tz = "UTC")
+  ) %>%
+  select(monitor, date_hour, date, hour, everything()) %>%
+  rename(
+    mod_pm25 = mean_pm25,
+    mod_temp = mean_met_temp,
+    mod_rh   = mean_met_rh
+  ) %>%
+  mutate(
+    month = month(date),
+    day   = day(date),
+    season = case_when(
+      month %in% c(12, 1, 2) ~ "Harmattan",
+      TRUE ~ "Not Harmattan"
+    ),
+    season = factor(season, levels = c("Harmattan", "Not Harmattan"))
+  ) %>%
+  filter(!is.na(mod_pm25))
+```
+
+
+## Load saved calibration models
+
+These are the previously trained Elastic Net and XGBoost workflows from build_GRIMM_calibration_model.Rmd
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+xgb_model <- read_rds(here("data", "calibration", "modulair_grimm_xgb_calib_workflow.rds"))
 
 enet_model <- read_rds(here("data", "calibration", "modulair_grimm_enet_model.rds"))
 
 ```
 
-## apply the predictions and save calibrated data
 
-```{r}
-modulair_preds <- calib_model %>%
-  predict(new_data = modulair_full) %>%
-  rename(pm25_fem_calibrated = .pred) %>%
-  bind_cols(modulair_full)
+## Apply calibration models
+
+Both saved models are applied to the full Modulair data set. Predicted calibrated PM2.5 values are constrained to be non-negative.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+modulair_preds <- modulair_full %>%
+  bind_cols(
+    predict(enet_model, new_data = .) %>% rename(pm25_fem_enet = .pred),
+    predict(xgb_model, new_data = .) %>% rename(pm25_fem_xgb = .pred)
+  ) %>%
+  mutate(
+    pm25_fem_enet = pmax(pm25_fem_enet, 0), 
+    pm25_fem_xgb  = pmax(pm25_fem_xgb, 0)
+  )
+```
 
 
+## Compare raw and calibrated PM2.5
+
+### Elastic Net predictions
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
 set.seed(123)
 plot_df <- modulair_preds %>% 
   sample_n(10000)   # or sample_frac(0.05)
 
-
-ggplot(plot_df, aes(x = mod_pm25, y = pm25_fem_calibrated, color = season)) +
+## ELASTIC NET PLOT -----
+ggplot(plot_df, aes(x = mod_pm25, y = pm25_fem_enet, color = season)) +
   geom_point(alpha = 0.3, size = 1) +
-  geom_abline(slope = 1, intercept = 0) +
   theme_minimal() +
   labs(x = "Modulair PM 2.5 readings",
        y = "GRIMM calibrated predictions",
-       title = "XGBoost GRIMM calibrated predictions of PM")
+       title = "Elastic Net GRIMM calibrated predictions of PM")
+```
 
-## Save calibrated data
-write_rds(
-  modulair_preds,
-  here("data", "all_measurements", "summarized", "modulair_full_calibrated.rds")
-)
+## XG Boost predictions
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(plot_df, aes(x = mod_pm25, y = pm25_fem_xgb, color = season)) +
+  geom_point(alpha = 0.3, size = 1) +
+  theme_minimal() +
+  labs(x = "Modulair PM 2.5 readings",
+       y = "GRIMM calibrated predictions",
+       title = "XG Boost GRIMM calibrated predictions of PM")
+```
+
+
+
+## Flag observations outside the training domain
+
+This section compares the full application data to the predictor ranges observed in the co-located training data. Observations outside those ranges are flagged as extrapolations.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+train_ranges <- mod_grimm_full %>%
+  summarise(
+    train_pm25_min = min(mod_pm25, na.rm = TRUE),
+    train_pm25_max = max(mod_pm25, na.rm = TRUE),
+    train_temp_min = min(mod_temp, na.rm = TRUE),
+    train_temp_max = max(mod_temp, na.rm = TRUE),
+    train_rh_min   = min(mod_rh, na.rm = TRUE),
+    train_rh_max   = max(mod_rh, na.rm = TRUE)
+  )
+
+
+train_pm25_min <- train_ranges$train_pm25_min
+train_pm25_max <- train_ranges$train_pm25_max
+train_temp_min <- train_ranges$train_temp_min
+train_temp_max <- train_ranges$train_temp_max
+train_rh_min   <- train_ranges$train_rh_min
+train_rh_max   <- train_ranges$train_rh_max
+
+modulair_preds_flagged <- modulair_preds %>%
+  mutate(
+    out_pm25 = mod_pm25 < train_pm25_min | mod_pm25 > train_pm25_max,
+    out_temp = !is.na(mod_temp) & (mod_temp < train_temp_min | mod_temp > train_temp_max),
+    out_rh   = !is.na(mod_rh)   & (mod_rh   < train_rh_min   | mod_rh   > train_rh_max),
+    any_extrapolation = out_pm25 | out_temp | out_rh
+  )
+
+overall_extrap_summary <- modulair_preds_flagged %>%
+  summarise(
+    n = n(),
+    pct_any_extrapolation = round(mean(any_extrapolation, na.rm = TRUE) * 100, 2),
+    pct_pm25_out = round(mean(out_pm25, na.rm = TRUE) * 100, 2),
+    pct_temp_out = round(mean(out_temp, na.rm = TRUE) * 100, 2),
+    pct_rh_out   = round(mean(out_rh, na.rm = TRUE) * 100, 2)
+  )
+```
+
+Overall proportion of observations with one or more predictors outside the range seen in the co-located training data.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+datatable(overall_extrap_summary, rownames = FALSE)
+```
+
+Monitor-level proportion of observations with one or more predictors outside the training range.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+monitor_extrap_summary <- modulair_preds_flagged %>%
+  group_by(monitor) %>%
+  summarise(
+    n = n(),
+    pct_any_extrapolation = mean(any_extrapolation, na.rm = TRUE) * 100,
+    pct_pm25_out = mean(out_pm25, na.rm = TRUE) * 100,
+    pct_temp_out = mean(out_temp, na.rm = TRUE) * 100,
+    pct_rh_out   = mean(out_rh, na.rm = TRUE) * 100
+  ) %>%
+  mutate(across(starts_with("pct_"), ~ round(.x, 2))) %>%
+  arrange(desc(pct_any_extrapolation))
+
+datatable(monitor_extrap_summary, rownames = FALSE)
+```
+
+## Summarize calibration changes elastic net 
+
+This section quantifies how much the calibrated predictions differ from the raw Modulair values.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+modulair_preds_flagged <- modulair_preds_flagged %>%
+  mutate(
+    delta_enet = pm25_fem_enet - mod_pm25,
+    delta_xgb  = pm25_fem_xgb  - mod_pm25,
+    ratio_enet = if_else(mod_pm25 > 0, pm25_fem_enet / mod_pm25, NA_real_),
+    ratio_xgb  = if_else(mod_pm25 > 0, pm25_fem_xgb  / mod_pm25, NA_real_)
+  )
+
+calib_change_table <- modulair_preds_flagged %>%
+  group_by(monitor) %>%
+  summarise(
+    n = n(),
+    mean_raw = round(mean(mod_pm25, na.rm = TRUE),2),
+    mean_enet = round(mean(pm25_fem_enet, na.rm = TRUE),2),
+    mean_xgb  = round(mean(pm25_fem_xgb, na.rm = TRUE),2),
+    mean_delta_enet = round(mean(delta_enet, na.rm = TRUE),2),
+    mean_delta_xgb  = round(mean(delta_xgb, na.rm = TRUE),2),
+    median_ratio_enet = median(ratio_enet, na.rm = TRUE),
+    median_ratio_xgb  = median(ratio_xgb, na.rm = TRUE)
+  ) %>%
+  arrange(desc(abs(mean_delta_enet)))
+```
+
+Summary of average raw PM2.5, calibrated PM2.5, and calibration shifts by monitor.
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=14}
+
+datatable(calib_change_table, rownames = FALSE)
+
+
+
+ggplot(modulair_preds_flagged, aes(x = monitor, y = delta_enet)) +
+  geom_boxplot() +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    x = "Monitor",
+    y = "XGB calibration change (calibrated - raw)",
+    title = "Calibration change by monitor"
+  )
+```
+
+## calibration change versus meteorology
+
+These plots show whether the size of the XGBoost calibration adjustment varies systematically with relative humidity or temperature.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(modulair_preds_flagged %>% 
+  sample_n(10000), aes(x = mod_rh, y = delta_enet)) +
+  geom_point(alpha = 0.2, size = 1) +
+  geom_smooth(se = FALSE) +
+  theme_minimal() +
+  labs(
+    x = "Relative humidity",
+    y = "XGB calibration change",
+    title = "Calibration change vs RH"
+  )
+
+
+ggplot(modulair_preds_flagged %>% 
+  sample_n(10000), aes(x = mod_temp, y = delta_enet)) +
+  geom_point(alpha = 0.2, size = 1) +
+  geom_smooth(se = FALSE) +
+  theme_minimal() +
+  labs(
+    x = "Temperature",
+    y = "XGB calibration change",
+    title = "Calibration change vs temperature"
+  )
+
+```
+
+
+
+## Summarize calibration changes XG Boost 
+
+This section quantifies how much the calibrated predictions differ from the raw Modulair values.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+modulair_preds_flagged <- modulair_preds_flagged %>%
+  mutate(
+    delta_enet = pm25_fem_enet - mod_pm25,
+    delta_xgb  = pm25_fem_xgb  - mod_pm25,
+    ratio_enet = if_else(mod_pm25 > 0, pm25_fem_enet / mod_pm25, NA_real_),
+    ratio_xgb  = if_else(mod_pm25 > 0, pm25_fem_xgb  / mod_pm25, NA_real_)
+  )
+
+calib_change_table <- modulair_preds_flagged %>%
+  group_by(monitor) %>%
+  summarise(
+    n = n(),
+    mean_raw = round(mean(mod_pm25, na.rm = TRUE),2),
+    mean_enet = round(mean(pm25_fem_enet, na.rm = TRUE),2),
+    mean_xgb  = round(mean(pm25_fem_xgb, na.rm = TRUE),2),
+    mean_delta_enet = round(mean(delta_enet, na.rm = TRUE),2),
+    mean_delta_xgb  = round(mean(delta_xgb, na.rm = TRUE),2),
+    median_ratio_enet = round(median(ratio_enet, na.rm = TRUE,2)),
+    median_ratio_xgb  = round(median(ratio_xgb, na.rm = TRUE,2))
+  ) %>%
+  arrange(desc(abs(mean_delta_xgb)))
+```
+
+Summary of average raw PM2.5, calibrated PM2.5, and calibration shifts by monitor.
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=14}
+
+datatable(calib_change_table, rownames = FALSE)
+
+
+
+ggplot(modulair_preds_flagged, aes(x = monitor, y = delta_xgb)) +
+  geom_boxplot() +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    x = "Monitor",
+    y = "XGB calibration change (calibrated - raw)",
+    title = "Calibration change by monitor"
+  )
+```
+
+## calibration change versus meteorology
+
+These plots show whether the size of the XGBoost calibration adjustment varies systematically with relative humidity or temperature.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(modulair_preds_flagged %>% 
+  sample_n(10000), aes(x = mod_rh, y = delta_xgb)) +
+  geom_point(alpha = 0.2, size = 1) +
+  geom_smooth(se = FALSE) +
+  theme_minimal() +
+  labs(
+    x = "Relative humidity",
+    y = "XGB calibration change",
+    title = "Calibration change vs RH"
+  )
+
+
+ggplot(modulair_preds_flagged %>% 
+  sample_n(10000), aes(x = mod_temp, y = delta_xgb)) +
+  geom_point(alpha = 0.2, size = 1) +
+  geom_smooth(se = FALSE) +
+  theme_minimal() +
+  labs(
+    x = "Temperature",
+    y = "XGB calibration change",
+    title = "Calibration change vs temperature"
+  )
+
 ```
 
