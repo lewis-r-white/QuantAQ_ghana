@@ -56,8 +56,8 @@ ghana_devices <- c("MOD-PM-00884", "MOD-00077", "MOD-00397", "MOD-PM-00879", "MO
 Sys.setenv(TZ = 'Africa/Accra') # GMT for Ghana
 
 # Define start_date and end_date
-start_date <- as.Date("2025-12-01")  # Due to timezones, start_date needs to be 1 day before the actual start date of interest
-end_date <- as.Date("2026-03-15")
+start_date <- as.Date("2024-08-15")  # Due to timezones, start_date needs to be 1 day before the actual start date of interest
+end_date <- as.Date("2024-10-31")
 country = "Ghana"
 device_list <- ghana_devices # rename list of serial numbers to broad name for function
 
@@ -146,7 +146,8 @@ cat("Data processing for all devices completed.\n")
 # Combine data for all devices into a single data frame
 final_result_df <- bind_rows(result_combined)
 
-saveRDS(final_result_df, file = "cloud_monitor_data_20251201_20260315.rds")
+saveRDS(final_result_df, file = "cloud_monitor_data_20240815_20241031.rds")
+write_csv(final_result_df, "ghana_AQ_parent_full_20240815_20241031.csv")
 ```
 
 ```{r}

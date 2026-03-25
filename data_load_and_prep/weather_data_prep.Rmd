@@ -140,7 +140,7 @@ temp_rh_sd_card <- tibble::tibble()  # empty tibble
 # LOAD THE CLOUD DATA ----
 
 measurements <- c("met_temp", "met_rh")
-cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20250831_20260315.csv"
+cloud_file <- "/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/all_measurements/cloud/ghana_AQ_parent_full_20240815_20241031.csv"
 
 raw_data <- map(measurements, ~ load_pollution_datasets(.x, file_path = cloud_file, file_type = "csv"))
 names(raw_data) <- measurements
@@ -204,10 +204,10 @@ met_rh_merged   <- merged_weather$met_rh
 
 
 ## save outputs
-# write_csv(met_temp_merged, here("data", "weather", "merged", "met_temp_merged_20250831-20260315.csv"))
-# write_csv(met_rh_merged, here("data", "weather", "merged",  "met_rh_merged_20250831-20260315.csv"))
-# write_rds(met_temp_merged, here("data", "weather", "merged", "met_temp_merged_20250831-20260315.rds"))
-# write_rds(met_rh_merged, here("data", "weather", "merged", "met_rh_merged_20250831-20260315.rds"))
+# write_csv(met_temp_merged, here("data", "weather", "merged", "met_temp_merged_20240816-20241031.csv"))
+# write_csv(met_rh_merged, here("data", "weather", "merged",  "met_rh_merged_20240816-20241031.csv"))
+# write_rds(met_temp_merged, here("data", "weather", "merged", "met_temp_merged_20240816-20241031.rds"))
+# write_rds(met_rh_merged, here("data", "weather", "merged", "met_rh_merged_20240816-20241031.rds"))
 
 ```
 
@@ -233,12 +233,12 @@ rh_daily <- met_rh_summary$daily
 
 # save the summarized outputs 
 #temp
-write_csv(temp_hourly, here("data", "weather", "summarized", "temp_hourly_20250831-20260315.csv"))
-write_csv(temp_daily, here("data", "weather", "summarized", "temp_daily_20250831-20260315.csv"))
+write_csv(temp_hourly, here("data", "weather", "summarized", "temp_hourly_20240816-20241031.csv"))
+write_csv(temp_daily, here("data", "weather", "summarized", "temp_daily_20240816-20241031.csv"))
 
 # rh
-write_csv(rh_hourly, here("data", "weather", "summarized", "rh_hourly_20250831-20260315.csv"))
-write_csv(rh_daily, here("data", "weather", "summarized", "rh_daily_20250831-20260315.csv"))
+write_csv(rh_hourly, here("data", "weather", "summarized", "rh_hourly_20240816-20241031.csv"))
+write_csv(rh_daily, here("data", "weather", "summarized", "rh_daily_20240816-20241031.csv"))
 
 
 ## join temp and rh into one summarized df ----
@@ -340,8 +340,8 @@ wd_merged   <- merged_wind$wd
 
 
 # save output
-write_rds(ws_merged, here("data", "weather", "merged", "ws_merged_20250831-20260315.rds"))
-write_rds(wd_merged, here("data", "weather", "merged", "wd_merged_20250831-20260315.rds"))
+write_rds(ws_merged, here("data", "weather", "merged", "ws_merged_20240816-20241031.rds"))
+write_rds(wd_merged, here("data", "weather", "merged", "wd_merged_20240816-20241031.rds"))
 
 
 ```
@@ -380,7 +380,7 @@ temp_rh_full <- full_join(met_temp_merged_unique, met_rh_merged_unique, by = c("
   
 
 # save output 
-# write_rds(temp_rh_full, here("data", "weather", "merged", "temp_rh_full_20250831-20260315.rds"))
+# write_rds(temp_rh_full, here("data", "weather", "merged", "temp_rh_full_20240816-20241031.rds"))
 
 
 # create full wind data 
@@ -391,7 +391,7 @@ wind_full <- full_join(ws_merged_merged_unique, wd_merged_merged_unique, by = c(
   select(monitor, timestamp, date, hour, ws, wd)
 
 # save output 
-# write_rds(wind_full, here("data", "weather", "merged", "wind_full_20250831-20260315.rds"))
+# write_rds(wind_full, here("data", "weather", "merged", "wind_full_20240816-20241031.rds"))
 
 
 
@@ -405,7 +405,7 @@ weather_full <- weather_full %>%
          hour = hour(timestamp))
 
 # save output 
-write_rds(weather_full, here("data", "weather", "all_weather", "all_weather_vars_20250831-20260315.rds"))
+write_rds(weather_full, here("data", "weather", "all_weather", "all_weather_vars_20240816-20241031.rds"))
 ```
 
 
