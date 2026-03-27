@@ -43,19 +43,19 @@ library(future)
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 
 ## PM DATA ----
-modulair_pm_25_hourly <- read_csv(here("data", "pm", "summarized", "pm25_community_hourly_20240816-20250901.csv")) %>%
+modulair_pm_25_hourly <- read_csv(here("data", "pm", "summarized", "pm25_community_hourly_20241031-20250901.csv")) %>%
   filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
   filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
   filter(!is.na(mean_pm25)) %>%
   select(-c(n_minute_obs, n_active, fleet_average_pm25))
 
-modulair_pm_1_hourly <- read_csv(here("data", "pm", "summarized", "pm1_community_hourly_20240816-20250901.csv")) %>%
+modulair_pm_1_hourly <- read_csv(here("data", "pm", "summarized", "pm1_community_hourly_20241031-20250901.csv")) %>%
   filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
   filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
   filter(!is.na(mean_pm1)) %>%
   select(-c(n_minute_obs, n_active, fleet_average_pm1))
 
-modulair_pm_10_hourly <- read_csv(here("data", "pm", "summarized", "pm10_community_hourly_20240816-20250901.csv")) %>%
+modulair_pm_10_hourly <- read_csv(here("data", "pm", "summarized", "pm10_community_hourly_20241031-20250901.csv")) %>%
   filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
   filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
   filter(!is.na(mean_pm10)) %>%
@@ -119,13 +119,13 @@ modulair_pm_hourly <- bind_rows(batch1_pm_00884_hourly, batch2_pm_00884_hourly, 
 
 ## WEATHER DATA -----
 
-modulair_temp_hourly <- read_csv(here("data", "weather", "summarized", "temp_hourly_20240816-20250901.csv")) %>%
+modulair_temp_hourly <- read_csv(here("data", "weather", "summarized", "temp_hourly_20241031-20250901.csv")) %>%
   filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
   filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
   filter(!is.na(mean_met_temp))%>%
   select(-c(n_minute_obs, n_active, fleet_average_met_temp)) 
 
-modulair_rh_hourly <- read_csv(here("data", "weather", "summarized", "rh_hourly_20240816-20250901.csv")) %>%
+modulair_rh_hourly <- read_csv(here("data", "weather", "summarized", "rh_hourly_20241031-20250901.csv")) %>%
   filter(monitor %in% c("MOD-PM-00884")) %>% # filter to monitors co-located with GRIMM
   filter(date > as.Date("2025-08-10")) %>% ## filter data prior to GRIMM deployment 
   filter(!is.na(mean_met_rh))%>%
