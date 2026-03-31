@@ -116,20 +116,20 @@ source(here("src", "load_and_merge_pm_data.R"))
 pollutants <- c("pm1", "pm25", "pm10")
 
 sd_paths <- c(
-  here("data/all_measurements/sd/full_sd_card_2024-08-20_to_2025-01-29.csv"),
-  here("data/all_measurements/sd/full_sd_card_2025-03-01_to_2025-09-01.csv")
+  here("data/all_measurements/sd/full_sd_card_20241031-20250129.csv"),
+  here("data/all_measurements/sd/full_sd_card_20250301-20250901.csv")
 )
 
 # if don't have sd data use this
-sd_paths <- character(0) 
+# sd_paths <- character(0) 
 
 
-cloud_path <- here("data/all_measurements/cloud/ghana_AQ_parent_full_20240815_20241031.csv")
+cloud_path <- here("data/all_measurements/cloud/ghana_AQ_parent_full_20241031_20250901.csv")
 
 data_loaded <- load_and_merge_all_pm(sd_paths, cloud_path, pollutants)
 
 raw_data       <- data_loaded$cloud
-full_sd_card   <- data_loaded$sd
+full_sd_card   <- data_loaded$sd 
 merged_results <- data_loaded$merged
 ```
 
@@ -284,18 +284,18 @@ pm10_corrected <- apply_calibration(
 
 
 ## SAVE THE CORRECTED OUTPUT 
-# 
-# write_csv(pm1_corrected, here("data", "pm", "final", "pm1_corrected_20240816_20241031.csv"))
-# 
-# write_csv(pm10_corrected, here("data", "pm", "final", "pm10_corrected_20240816_20241031.csv"))
-# 
-# write_csv(pm25_corrected, here("data", "pm", "final", "pm25_corrected_20240816_20241031.csv"))
-# 
-# write_rds(pm1_corrected, here("data", "pm", "final", "pm1_corrected_20240816_20241031.rds"))
-# 
-# write_rds(pm10_corrected, here("data", "pm", "final", "pm10_corrected_20240816_20241031.rds"))
-# 
-# write_rds(pm25_corrected, here("data", "pm", "final", "pm25_corrected_20240816_20241031.rds"))
+
+write_csv(pm1_corrected, here("data", "pm", "final", "pm1_corrected_20241031_20250901.csv"))
+
+write_csv(pm10_corrected, here("data", "pm", "final", "pm10_corrected_20241031_20250901.csv"))
+
+write_csv(pm25_corrected, here("data", "pm", "final", "pm25_corrected_20241031_20250901.csv"))
+
+write_rds(pm1_corrected, here("data", "pm", "final", "pm1_corrected_20241031_20250901.rds"))
+
+write_rds(pm10_corrected, here("data", "pm", "final", "pm10_corrected_20241031_20250901.rds"))
+
+write_rds(pm25_corrected, here("data", "pm", "final", "pm25_corrected_20241031_20250901.rds"))
 
 
 ## CREATE CORRECTED FULL DATASET
@@ -322,7 +322,7 @@ corrected_full <- list(pm25_keep, pm1_keep, pm10_keep) %>%
   relocate(monitor, timestamp, date, hour)
 
 
-# write_rds(corrected_full, here("data", "pm", "final", "corrected_full_data_20240816-20241031.rds"))
+write_rds(corrected_full, here("data", "pm", "final", "corrected_full_data_20241031_20250901.rds"))
 ```
 
 ### summarize the data based on corrected values
@@ -389,23 +389,23 @@ pm10_community_daily <- summarized_pm10$daily #%>%
 
 ```{r}
 # Save as CSV
-write_csv(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20241031.csv"))
-write_csv(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20241031.csv"))
-write_csv(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20241031.csv"))
+write_csv(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20241031_20250901.csv"))
+write_csv(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20241031_20250901.csv"))
+write_csv(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20241031_20250901.csv"))
 
-write_csv(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20241031.csv"))
-write_csv(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20241031.csv"))
-write_csv(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20241031.csv"))
+write_csv(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20241031_20250901.csv"))
+write_csv(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20241031_20250901.csv"))
+write_csv(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20241031_20250901.csv"))
 
 #
 # # Save as RDS
-write_rds(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20240816-20241031.rds"))
-write_rds(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20240816-20241031.rds"))
-write_rds(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20240816-20241031.rds"))
+write_rds(pm1_community_hourly, here("data", "pm", "summarized", "pm1_community_hourly_20241031_20250901.rds"))
+write_rds(pm25_community_hourly, here("data", "pm", "summarized", "pm25_community_hourly_20241031_20250901.rds"))
+write_rds(pm10_community_hourly, here("data", "pm", "summarized", "pm10_community_hourly_20241031_20250901.rds"))
 
-write_rds(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20240816-20241031.rds"))
-write_rds(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20240816-20241031.rds"))
-write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20240816-20241031.rds"))
+write_rds(pm1_community_daily, here("data", "pm", "summarized", "pm1_community_daily_20241031_20250901.rds"))
+write_rds(pm25_community_daily, here("data", "pm", "summarized", "pm25_community_daily_20241031_20250901.rds"))
+write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community_daily_20241031_20250901.rds"))
 
 ```
 
@@ -413,34 +413,34 @@ write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community
 ```{r}
 # # Create full summarized data with all PMs
 
-# pm25_community_hourly <- pm25_community_hourly %>%
-#   select(monitor, date, hour, mean_pm25)
-# 
-# pm1_community_hourly <- pm1_community_hourly %>%
-#   select(monitor, date, hour, mean_pm1)
-# 
-# pm10_community_hourly <- pm10_community_hourly %>%
-#   select(monitor, date, hour, mean_pm10)
-# 
-# full_hourly_summary <- left_join(pm25_community_hourly, pm1_community_hourly, by = c("monitor", "date", "hour")) %>%
-#   left_join(pm10_community_hourly, by = c("monitor", "date", "hour"))
-# 
-# write_csv(full_hourly_summary, here("data", "pm", "summarized", "modpm00884_hourly_20250901-20251115.csv"))
-# 
-# 
-# pm25_community_daily <- pm25_community_daily %>%
-#   select(monitor, date, mean_pm25)
-# 
-# pm1_community_daily <- pm1_community_daily %>%
-#   select(monitor, date, mean_pm1)
-# 
-# pm10_community_daily <- pm10_community_daily %>%
-#   select(monitor, date, mean_pm10)
-# 
-# full_daily_summary <- left_join(pm25_community_daily, pm1_community_daily, by = c("monitor", "date")) %>%
-#   left_join(pm10_community_daily, by = c("monitor", "date"))
-# 
-# write_csv(full_daily_summary, here("data", "pm", "summarized", "modpm00884_daily_20250901-20251115.csv"))
+pm25_community_hourly <- pm25_community_hourly %>%
+  select(monitor, date, hour, mean_pm25)
+
+pm1_community_hourly <- pm1_community_hourly %>%
+  select(monitor, date, hour, mean_pm1)
+
+pm10_community_hourly <- pm10_community_hourly %>%
+  select(monitor, date, hour, mean_pm10)
+
+full_hourly_summary <- left_join(pm25_community_hourly, pm1_community_hourly, by = c("monitor", "date", "hour")) %>%
+  left_join(pm10_community_hourly, by = c("monitor", "date", "hour"))
+
+write_csv(full_hourly_summary, here("data", "pm", "summarized", "full_hourly_20241031_20250901.csv"))
+
+
+pm25_community_daily <- pm25_community_daily %>%
+  select(monitor, date, mean_pm25)
+
+pm1_community_daily <- pm1_community_daily %>%
+  select(monitor, date, mean_pm1)
+
+pm10_community_daily <- pm10_community_daily %>%
+  select(monitor, date, mean_pm10)
+
+full_daily_summary <- left_join(pm25_community_daily, pm1_community_daily, by = c("monitor", "date")) %>%
+  left_join(pm10_community_daily, by = c("monitor", "date"))
+
+write_csv(full_daily_summary, here("data", "pm", "summarized", "full_daily_20241031_20250901.csv"))
 
 ```
 
@@ -450,90 +450,90 @@ write_rds(pm10_community_daily, here("data", "pm", "summarized", "pm10_community
 
 ```{r}
 ## one time tasks 
-
-modpm00884_raw <- read_csv("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/pm/final/corrected_modpm00884_20240816-20240901.csv") 
-
-
-summarized_pm1 <- summarize_pollution_times(
-  modpm00884_raw, "pm1_raw",
-  min_minutes_per_hour = 45,
-  min_hours_per_day   = 18,
-  min_active_monitors = 10
-) 
-
-summarized_pm25 <- summarize_pollution_times(
-  modpm00884_raw, "pm25_raw",
-  min_minutes_per_hour = 45,
-  min_hours_per_day   = 18,
-  min_active_monitors = 10
-) 
-
-summarized_pm10 <- summarize_pollution_times(
-  modpm00884_raw, "pm10_raw",
-  min_minutes_per_hour = 45,
-  min_hours_per_day   = 18,
-  min_active_monitors = 10
-) 
-
-pm1_community_hourly <- summarized_pm1$hourly %>%
-  select(monitor, date, hour, mean_pm1_raw)
-pm10_community_hourly <- summarized_pm10$hourly %>%
-  select(monitor, date, hour, mean_pm10_raw)
-pm25_community_hourly <- summarized_pm25$hourly %>%
-  select(monitor, date, hour, mean_pm25_raw)
-
-mod_pm_00884_summary = left_join(pm1_community_hourly, pm10_community_hourly) %>%
-  left_join(pm25_community_hourly)
-
-write_csv(mod_pm_00884_summary, here("data", "pm", "summarized", "modpm00884_raw_hourly_20250901-20251115.csv"))
-
-
-
-
-mod00884_pm1 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/pm/final/pm1_corrected_20240816_20250901.rds") %>%
-  filter(monitor == "MOD-PM-00884") %>%
-  filter(date > as.Date("2025-08-01"))
-
-mod00884_pm10 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/pm/final/pm10_corrected_20240816_20250901.rds") %>%
-  filter(monitor == "MOD-PM-00884") %>%
-  filter(date > as.Date("2025-08-01"))
-
-mod00884_pm25 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/pm/final/pm25_corrected_20240816_20250901.rds") %>%
-  filter(monitor == "MOD-PM-00884") %>%
-  filter(date > as.Date("2025-08-01"))
-
-
-
-summarized_pm1 <- summarize_pollution_times(
-  mod00884_pm1, "pm1_raw",
-  min_minutes_per_hour = 45,
-  min_hours_per_day   = 18,
-  min_active_monitors = 10
-) 
-
-summarized_pm25 <- summarize_pollution_times(
-  mod00884_pm25, "pm25_raw",
-  min_minutes_per_hour = 45,
-  min_hours_per_day   = 18,
-  min_active_monitors = 10
-) 
-
-summarized_pm10 <- summarize_pollution_times(
-  mod00884_pm10, "pm10_raw",
-  min_minutes_per_hour = 45,
-  min_hours_per_day   = 18,
-  min_active_monitors = 10
-) 
-
-pm1_community_hourly <- summarized_pm1$hourly %>%
-  select(monitor, date, hour, mean_pm1_raw)
-pm10_community_hourly <- summarized_pm10$hourly %>%
-  select(monitor, date, hour, mean_pm10_raw)
-pm25_community_hourly <- summarized_pm25$hourly %>%
-  select(monitor, date, hour, mean_pm25_raw)
-
-mod_pm_00884_summary = left_join(pm1_community_hourly, pm10_community_hourly) %>%
-  left_join(pm25_community_hourly)
+# 
+# modpm00884_raw <- read_csv("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/pm/final/corrected_modpm00884_20240816-20240901.csv") 
+# 
+# 
+# summarized_pm1 <- summarize_pollution_times(
+#   modpm00884_raw, "pm1_raw",
+#   min_minutes_per_hour = 45,
+#   min_hours_per_day   = 18,
+#   min_active_monitors = 10
+# ) 
+# 
+# summarized_pm25 <- summarize_pollution_times(
+#   modpm00884_raw, "pm25_raw",
+#   min_minutes_per_hour = 45,
+#   min_hours_per_day   = 18,
+#   min_active_monitors = 10
+# ) 
+# 
+# summarized_pm10 <- summarize_pollution_times(
+#   modpm00884_raw, "pm10_raw",
+#   min_minutes_per_hour = 45,
+#   min_hours_per_day   = 18,
+#   min_active_monitors = 10
+# ) 
+# 
+# pm1_community_hourly <- summarized_pm1$hourly %>%
+#   select(monitor, date, hour, mean_pm1_raw)
+# pm10_community_hourly <- summarized_pm10$hourly %>%
+#   select(monitor, date, hour, mean_pm10_raw)
+# pm25_community_hourly <- summarized_pm25$hourly %>%
+#   select(monitor, date, hour, mean_pm25_raw)
+# 
+# mod_pm_00884_summary = left_join(pm1_community_hourly, pm10_community_hourly) %>%
+#   left_join(pm25_community_hourly)
+# 
+# write_csv(mod_pm_00884_summary, here("data", "pm", "summarized", "modpm00884_raw_hourly_20250901-20251115.csv"))
+# 
+# 
+# 
+# 
+# mod00884_pm1 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/pm/final/pm1_corrected_20240816_20250901.rds") %>%
+#   filter(monitor == "MOD-PM-00884") %>%
+#   filter(date > as.Date("2025-08-01"))
+# 
+# mod00884_pm10 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/pm/final/pm10_corrected_20240816_20250901.rds") %>%
+#   filter(monitor == "MOD-PM-00884") %>%
+#   filter(date > as.Date("2025-08-01"))
+# 
+# mod00884_pm25 <- read_rds("/Users/lewiswhite/CHAP_columbia/QuantAQ_ghana/data/pm/final/pm25_corrected_20240816_20250901.rds") %>%
+#   filter(monitor == "MOD-PM-00884") %>%
+#   filter(date > as.Date("2025-08-01"))
+# 
+# 
+# 
+# summarized_pm1 <- summarize_pollution_times(
+#   mod00884_pm1, "pm1_raw",
+#   min_minutes_per_hour = 45,
+#   min_hours_per_day   = 18,
+#   min_active_monitors = 10
+# ) 
+# 
+# summarized_pm25 <- summarize_pollution_times(
+#   mod00884_pm25, "pm25_raw",
+#   min_minutes_per_hour = 45,
+#   min_hours_per_day   = 18,
+#   min_active_monitors = 10
+# ) 
+# 
+# summarized_pm10 <- summarize_pollution_times(
+#   mod00884_pm10, "pm10_raw",
+#   min_minutes_per_hour = 45,
+#   min_hours_per_day   = 18,
+#   min_active_monitors = 10
+# ) 
+# 
+# pm1_community_hourly <- summarized_pm1$hourly %>%
+#   select(monitor, date, hour, mean_pm1_raw)
+# pm10_community_hourly <- summarized_pm10$hourly %>%
+#   select(monitor, date, hour, mean_pm10_raw)
+# pm25_community_hourly <- summarized_pm25$hourly %>%
+#   select(monitor, date, hour, mean_pm25_raw)
+# 
+# mod_pm_00884_summary = left_join(pm1_community_hourly, pm10_community_hourly) %>%
+#   left_join(pm25_community_hourly)
 
 # write_csv(mod_pm_00884_summary, here("data", "pm", "summarized", "modpm00884_raw_hourly_20250801-20250901.csv"))
 

@@ -141,10 +141,10 @@ merge_sd_data_one <- function(pollutant_data, sd_card_data, pollutant) {
   joined %>%
     mutate(
       !!rlang::sym(pollutant) := coalesce(.data[[pol_cloud]], .data[[pol_sd]]),
-      source = coalesce(
-        if ("source.cloud" %in% names(.)) .data[["source.cloud"]] else NA_character_,
-        if ("source.sd" %in% names(.))    .data[["source.sd"]]    else NA_character_,
-        if ("source" %in% names(.))       .data[["source"]]       else NA_character_
+      source = case_when(
+        !is.na(.data[[pol_cloud]]) ~ "cloud",
+        is.na(.data[[pol_cloud]]) & !is.na(.data[[pol_sd]]) ~ "sd_card",
+        TRUE ~ NA_character_
       )
     ) %>%
     select(monitor, timestamp, date, hour, !!rlang::sym(pollutant), source)
